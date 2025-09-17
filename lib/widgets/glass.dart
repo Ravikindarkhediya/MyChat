@@ -175,53 +175,109 @@ class GlassInfoCard extends StatelessWidget {
 }
 
 
-class GlassCard extends StatelessWidget {
-  final Widget child;
-  final EdgeInsetsGeometry? padding;
+// class GlassCard extends StatelessWidget {
+//   final Widget child;
+//   final EdgeInsetsGeometry? padding;
+//
+//   const GlassCard({
+//     super.key,
+//     required this.child,
+//     this.padding,
+//   });
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     return TweenAnimationBuilder<double>(
+//       duration: const Duration(milliseconds: 1000),
+//       tween: Tween(begin: 0.8, end: 1.0),
+//       curve: Curves.easeOutBack,
+//       child: child,
+//       builder: (context, value, child) {
+//         return Transform.scale(
+//           scale: value,
+//           child: ClipRRect(
+//             borderRadius: BorderRadius.circular(12),
+//             child: BackdropFilter(
+//               filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+//               child: Padding(
+//                 padding: padding ?? const EdgeInsets.all(10),
+//                 child: Container(
+//                   constraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+//                   decoration: BoxDecoration(
+//                     borderRadius: BorderRadius.circular(12),
+//                     border: Border.all(color: Colors.white.withOpacity(0.2)),
+//                     gradient: LinearGradient(
+//                       colors: [
+//                         Colors.white.withOpacity(0.15),
+//                         Colors.white.withOpacity(0.3),
+//                       ],
+//                       begin: Alignment.topLeft,
+//                       end: Alignment.bottomRight,
+//                     ),
+//                   ),
+//                   child: child,
+//                 ),
+//               ),
+//             ),
+//           ),
+//         );
+//       },
+//     );
+//   }
+// }
 
-  const GlassCard({
+
+class GlassContainer extends StatelessWidget {
+  final Widget child;
+  final double? width;
+  final double? height;
+  final EdgeInsetsGeometry? margin;
+  final EdgeInsetsGeometry? padding;
+  final double borderRadius;
+  final double opacity;
+
+  const GlassContainer({
     super.key,
     required this.child,
+    this.width,
+    this.height,
+    this.margin,
     this.padding,
+    this.borderRadius = 16,
+    this.opacity = 0.15,
   });
 
   @override
   Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      duration: const Duration(milliseconds: 1000),
-      tween: Tween(begin: 0.8, end: 1.0),
-      curve: Curves.easeOutBack,
-      child: child,
-      builder: (context, value, child) {
-        return Transform.scale(
-          scale: value,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Padding(
-                padding: padding ?? const EdgeInsets.all(10),
-                child: Container(
-                  constraints: const BoxConstraints(minWidth: 0, minHeight: 0),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.withOpacity(0.2)),
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.white.withOpacity(0.15),
-                        Colors.white.withOpacity(0.3),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                  ),
-                  child: child,
-                ),
+    return Container(
+      width: width,
+      height: height,
+      margin: margin,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: padding,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withOpacity(opacity),
+                  Colors.white.withOpacity(opacity * 0.5),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(borderRadius),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.2),
+                width: 1.5,
               ),
             ),
+            child: child,
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }

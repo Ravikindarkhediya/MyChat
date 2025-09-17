@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // firebase import
 import 'login_page.dart';
-import 'home_page.dart'; // <-- apna homepage import kar
+import 'home_page.dart';
 
 class SplashController extends GetxController {
   @override
@@ -18,12 +18,10 @@ class SplashController extends GetxController {
       final user = FirebaseAuth.instance.currentUser;
 
       if (user != null) {
-        // user logged-in hai
         Get.off(() => HomePage(),
             transition: Transition.fadeIn,
             duration: const Duration(milliseconds: 800));
       } else {
-        // user logged-in nahi hai
         Get.off(() => LoginPage(),
             transition: Transition.fadeIn,
             duration: const Duration(milliseconds: 800));
@@ -44,7 +42,7 @@ class SplashPage extends StatelessWidget {
       backgroundColor: const Color(0xFF2575FC),
       body: Center(
         child: Lottie.asset(
-          "assets/icons/Chat_Bubble.json",
+          'assets/icons/Chat_Bubble.json',
           width: 200,
           height: 200,
           fit: BoxFit.cover,

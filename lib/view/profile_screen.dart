@@ -30,7 +30,6 @@ class _ProfileScreenState extends State<ProfileScreen>
   late final ProfileController profileController;
   final ChatService chatService = ChatService();
   final ImagePicker _picker = ImagePicker();
-
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _bioController = TextEditingController();
@@ -60,10 +59,10 @@ class _ProfileScreenState extends State<ProfileScreen>
       }
 
       // Load user data
-      final userData = await _chatController.getUserData(userId);
+      final userData = await chatService.getUserData(userId);
       if (userData != null) {
         setState(() {
-          _user = UserModel.fromMap(userData);
+          _user = userData;
           // Initialize controllers with user data
           _nameController.text = _user?.name ?? '';
           _bioController.text = _user?.bio ?? '';
@@ -77,11 +76,6 @@ class _ProfileScreenState extends State<ProfileScreen>
           profileController.status.value = _user?.status ?? '';
         });
 
-        // Load friends list if it's the current user's profile
-        if (widget.isCurrentUser ||
-            userId == _chatController.currentUserId.value) {
-          await _loadFriends();
-        }
       }
     } catch (e) {
       Get.snackbar('Error', 'Failed to load user data: $e');
@@ -236,15 +230,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             textController: _bioController,
             isEditable: true,
           ),
-          // Status - editable
-          GlassInfoCard(
-            label: 'Status',
-            value: profileController.status,
-            controller: profileController,
-            fieldName: 'status',
-            textController: _statusController,
-            isEditable: true,
-          ),
+
           // CreatedAt - non-editable
           GlassInfoCard(
             label: 'Created At',
@@ -414,24 +400,22 @@ class _ProfileScreenState extends State<ProfileScreen>
   Widget _buildSignOutButton({required VoidCallback onPressed}) {
     return InkWell(
       onTap: onPressed,
-      child: GlassCard(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.logout, color: Colors.redAccent, size: 22),
-              const SizedBox(width: 10),
-              Text(
-                'Sign Out',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.redAccent.withOpacity(0.9),
-                ),
+      child: GlassContainer(
+        padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.logout, color: Colors.redAccent, size: 22),
+            const SizedBox(width: 10),
+            Text(
+              'Sign Out',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.redAccent.withOpacity(0.9),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

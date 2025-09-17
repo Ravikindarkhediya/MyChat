@@ -20,9 +20,6 @@ class UserService {
   /// Gets the current user's ID
   String? get currentUserId => _auth.currentUser?.uid;
 
-  /// Gets a stream of the current user's data
-  /// 
-  /// Returns null if no user is logged in or an error occurs
   Stream<UserModel?> getCurrentUserStream() {
     final userId = currentUserId;
     if (userId == null) {
@@ -57,9 +54,6 @@ class UserService {
         });
   }
 
-  /// Gets a stream of all users (excluding current user)
-  /// 
-  /// Returns an empty list if an error occurs
   Stream<List<UserModel>> getUsers({String? excludeUserId, int limit = 20}) {
     try {
       Query<Map<String, dynamic>> query = _usersRef.limit(limit);
@@ -124,10 +118,7 @@ class UserService {
     }
   }
 
-  /// Creates or updates a user in Firestore
-  /// 
-  /// Throws [FirebaseException] if there's a Firebase error
-  /// Throws [ArgumentError] if user data is invalid
+
   Future<void> saveUser(UserModel user) async {
     try {
       if (user.uid.isEmpty) {

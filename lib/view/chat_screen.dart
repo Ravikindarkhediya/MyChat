@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:ads_demo/constant/common.dart';
 import 'package:ads_demo/services/chat_services.dart';
+import 'package:ads_demo/widgets/glass.dart';
 import 'package:animated_background/animated_background.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -81,19 +82,32 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
   }
 
+  // Replace the _initializeChat method in ChatScreen with this:
+
   Future<void> _initializeChat() async {
     setState(() => _isLoading = true);
 
     try {
       if (widget.peerUser != null) {
         _peerUser = widget.peerUser;
-      } else if (widget.peerUser?.uid != null) {
-        final userData = await _chatController.getUserData(
-          widget.peerUser!.uid,
-        );
-        if (userData != null) {
-          _peerUser = UserModel.fromMap(userData);
+      } else if (widget.chatId != null) {
+        // If we have chatId but no peer user, extract peer ID from chatId
+        final chatIdParts = widget.chatId!.split('_');
+        if (chatIdParts.length == 2) {
+          final currentUserId = _chatController.currentUserId.value;
+          final peerUserId = chatIdParts[0] == currentUserId
+              ? chatIdParts[1]
+              : chatIdParts[0];
+
+          final userData = await _chatService.getUserData(peerUserId);
+          if (userData != null) {
+            _peerUser = userData;
+          }
         }
+      }
+
+      if (_peerUser == null) {
+        throw Exception('Unable to load peer user data');
       }
     } catch (e) {
       Get.snackbar(
@@ -155,46 +169,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
   }
 
-  Widget _buildGlassContainer({
-    required Widget child,
-    double? width,
-    double? height,
-    EdgeInsetsGeometry? margin,
-    EdgeInsetsGeometry? padding,
-    double borderRadius = 16,
-    double opacity = 0.15,
-  }) {
-    return Container(
-      width: width,
-      height: height,
-      margin: margin,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(borderRadius),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            padding: padding,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Colors.white.withOpacity(opacity),
-                  Colors.white.withOpacity(opacity * 0.5),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(borderRadius),
-              border: Border.all(
-                color: Colors.white.withOpacity(0.2),
-                width: 1.5,
-              ),
-            ),
-            child: child,
-          ),
-        ),
-      ),
-    );
-  }
+
 
   Widget _buildMessageList() {
     return StreamBuilder<List<MessageModel>>(
@@ -205,7 +180,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return Center(
-            child: _buildGlassContainer(
+            child: GlassContainer(
               padding: const EdgeInsets.all(20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -240,7 +215,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(
-            child: _buildGlassContainer(
+            child: GlassContainer(
               padding: const EdgeInsets.all(20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -265,14 +240,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         }
 
         final messages = snapshot.data ?? [];
-
         if (messages.isEmpty) {
           return Center(
             child: FadeTransition(
               opacity: _fadeAnimation,
               child: SlideTransition(
                 position: _slideAnimation,
-                child: _buildGlassContainer(
+                child: GlassContainer(
                   margin: const EdgeInsets.all(24),
                   padding: const EdgeInsets.all(24),
                   child: Column(
@@ -353,7 +327,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   Widget _buildMessageInput() {
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-      child: _buildGlassContainer(
+      child: GlassContainer(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         borderRadius: 25,
         opacity: 0.2,
@@ -408,11 +382,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               duration: const Duration(milliseconds: 200),
               child: _buildActionButton(
                 icon: _isTyping ? Icons.send_rounded : Icons.mic_rounded,
-                onPressed: _isTyping
-                    ? _sendMessage
-                    : () {
-                        // TODO: Implement voice message
-                      },
+                onPressed: _isTyping ? _sendMessage : () {},
                 isHighlighted: _isTyping,
               ),
             ),
@@ -516,7 +486,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             ),
           ),
           child: Center(
-            child: _buildGlassContainer(
+            child: GlassContainer(
               padding: const EdgeInsets.all(24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -729,11 +699,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF1e3c72),
-              Color(0xFF2a5298),
-              Colors.black,
-            ],
+            colors: [Color(0xFF1e3c72), Color(0xFF2a5298), Colors.black],
           ),
         ),
         child: AnimatedBackground(
@@ -743,20 +709,19 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             children: [
               // Messages list
               Expanded(
-                child: Stack(
-                  children: [
-                    // Messages
-                    _buildMessageList(),
-                  ],
+                child: Padding(
+                  padding: EdgeInsets.only(top: MediaQuery.of(context).size.height * 0.1),
+                  child: _buildMessageList(),
                 ),
               ),
+
 
               // Emoji picker
               AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
                 height: _isEmojiVisible ? 280 : 0,
                 child: _isEmojiVisible
-                    ? _buildGlassContainer(
+                    ? GlassContainer(
                         margin: const EdgeInsets.symmetric(horizontal: 12),
                         padding: const EdgeInsets.all(16),
                         child: Column(

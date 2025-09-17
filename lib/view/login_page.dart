@@ -49,7 +49,7 @@ class LoginPage extends StatelessWidget {
                     TextField(
                       onChanged: authController.setEmail,
                       decoration: InputDecoration(
-                        hintText: "Email",
+                        hintText: 'Email',
                         hintStyle: const TextStyle(color: Colors.white70),
                         filled: true,
                         fillColor: Colors.white.withOpacity(0.2),
@@ -69,7 +69,7 @@ class LoginPage extends StatelessWidget {
                       obscureText: true,
                       onChanged: authController.setPassword,
                       decoration: InputDecoration(
-                        hintText: "Password",
+                        hintText: 'Password',
                         hintStyle: const TextStyle(color: Colors.white70),
                         filled: true,
                         fillColor: Colors.white.withOpacity(0.2),
@@ -107,19 +107,19 @@ class LoginPage extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    Row(
+                    const Row(
                       children: [
-                        const Expanded(
+                        Expanded(
                           child: Divider(color: Colors.white70, thickness: 1),
                         ),
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          padding: EdgeInsets.symmetric(horizontal: 10),
                           child: Text(
                             "or",
                             style: TextStyle(color: Colors.white70),
                           ),
                         ),
-                        const Expanded(
+                        Expanded(
                           child: Divider(color: Colors.white70, thickness: 1),
                         ),
                       ],
@@ -146,7 +146,7 @@ class LoginPage extends StatelessWidget {
                           height: 28,
                         ),
                         label: const Text(
-                          "Sign in with Google",
+                          'Sign in with Google',
                           style: TextStyle(color:  Colors.black, fontSize: 16),
                         ),
                       ),

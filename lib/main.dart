@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:get/get.dart';
-import 'controller/chat_controller.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
@@ -27,7 +25,7 @@ class MyApp extends StatelessWidget {
     return GetMaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData.light(useMaterial3: true),       // Light theme
-      darkTheme: ThemeData.dark(useMaterial3: true), // Dark purple theme
+      darkTheme: ThemeData.dark(useMaterial3: true),    // Dark purple theme
       themeMode: ThemeMode.system,
       home: SplashPage(),
     );

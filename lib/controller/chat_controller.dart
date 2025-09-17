@@ -1,17 +1,16 @@
 import 'dart:async';
 import 'package:ads_demo/view/login_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:logger/logger.dart';
+import '../constant/common.dart';
 import '../models/message_model.dart';
 import '../models/user_model.dart';
 import '../services/chat_services.dart';
 import '../services/user_service.dart';
-import 'dart:io';
 
 class ChatController extends GetxController {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -19,7 +18,8 @@ class ChatController extends GetxController {
   final ChatService _chatService = ChatService();
   final UserService _userService = UserService();
   final _logger = Logger();
-
+  late final StreamSubscription _networkSub;
+  final Common common = Common();
   // Constructor parameters
   final String userId;
   final String? peerId;
@@ -28,6 +28,7 @@ class ChatController extends GetxController {
 
   // Disposers
   final List<StreamSubscription> _subscriptions = [];
+  StreamSubscription? _userChatsSubscription;
 
   // Observables
   final RxList<MessageModel> messages = <MessageModel>[].obs;
@@ -39,6 +40,7 @@ class ChatController extends GetxController {
   final Rx<UserModel?> currentUser = Rx<UserModel?>(null);
   final GoogleSignIn _googleSignIn = GoogleSignIn();
   var userChats = <ChatSummary>[].obs;
+  final RxList<String> sentRequests = <String>[].obs;
 
   // Controllers
   final TextEditingController messageController = TextEditingController();
@@ -49,6 +51,7 @@ class ChatController extends GetxController {
   // For friend requests
   final RxList<UserModel> friendRequests = <UserModel>[].obs;
   final RxList<String> friendRequestIds = <String>[].obs;
+  final RxString highlightedUserId = ''.obs;
 
   // Chat state
   final RxString currentChatId = ''.obs;
@@ -63,119 +66,43 @@ class ChatController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    _initializeUser();
-    _listenToUserChats();
 
-    _setupNetworkListener();
+    _listenToUserChats();
+    _networkSub = Common().setupNetworkListener(
+      currentUserId: currentUserId,
+      onRestore: _loadInitialData,
+    );
     _setupSubscriptions();
   }
 
-  void _listenToUserChats() {
-    _chatService.getUserChats(userId).listen((chats) {
-      userChats.value = chats;
+
+  void listenSentRequests() {
+    _firestore
+        .collection('friend_requests')
+        .where('senderId', isEqualTo: currentUserId.value)
+        .snapshots()
+        .listen((query) {
+      sentRequests.value = query.docs.map((d) => d['receiverId'] as String).toList();
     });
   }
-// Network connectivity checker
-  Future<bool> _checkNetworkConnectivity() async {
-    try {
-      final connectivityResult = await Connectivity().checkConnectivity();
-      if (connectivityResult == ConnectivityResult.none) {
-        _showErrorSnackbar('No internet connection');
-        return false;
-      }
 
-      // Additional check by trying to reach Google DNS
-      final result = await InternetAddress.lookup('google.com');
-      return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
-    } catch (e) {
-      _logger.w('Network connectivity check failed', error: e);
-      return false;
-    }
-  }
+  void _listenToUserChats() {
+    // Cancel old subscription if any
+    _userChatsSubscription?.cancel();
 
-// Enhanced error handling for Firebase operations
-  Future<T?> _executeWithNetworkCheck<T>(Future<T> Function() operation) async {
-    if (!await _checkNetworkConnectivity()) {
-      _showErrorSnackbar('Please check your internet connection');
-      return null;
-    }
+    // Only subscribe if currentUserId available
+    if (currentUserId.value.isEmpty) return;
 
-    try {
-      return await operation();
-    } on SocketException catch (e) {
-      _logger.e('Network error', error: e);
-      _showErrorSnackbar('Network connection failed. Please check your internet.');
-      return null;
-    } on FirebaseException catch (e) {
-      if (e.code == 'unavailable') {
-        _showErrorSnackbar('Firebase service unavailable. Please try again later.');
-      } else {
-        _showErrorSnackbar('Firebase error: ${e.message}');
-      }
-      _logger.e('Firebase error', error: e);
-      return null;
-    } catch (e) {
-      _logger.e('Unexpected error', error: e);
-      _showErrorSnackbar('An unexpected error occurred');
-      return null;
-    }
-  }
-
-// Modified sendMessage with network check
-  Future<void> sendMessage() async {
-    final text = messageController.text.trim();
-    if (text.isEmpty || currentPeer.value == null) return;
-
-    try {
-      isSendingMessage.value = true;
-      messageController.clear();
-      isTyping.value = false;
-      _updateTypingStatus(false);
-
-      await _executeWithNetworkCheck(() async {
-        await _chatService.sendMessage(
-          senderId: currentUserId.value,
-          receiverId: currentPeer.value!.uid,
-          message: text,
-          senderName: currentUser.value?.name ?? 'Unknown',
-          senderPhotoUrl: currentUser.value?.photoUrl,
-        );
-      });
-
-    } catch (e) {
-      _logger.e('Error sending message', error: e);
-      messageController.text = text; // Restore message text
-    } finally {
-      isSendingMessage.value = false;
-    }
-  }
-
-// Network status monitoring
-  void _setupNetworkListener() {
-    _subscriptions.add(
-      Connectivity().onConnectivityChanged.listen(
-            (result) {
-          if (result == ConnectivityResult.none) {
-            _showErrorSnackbar('Internet connection lost');
-          } else {
-            _showSuccessSnackbar('Internet connection restored');
-            _retryFailedOperations();
-          }
-        },
-        onError: (error) {
-          _logger.e('Connectivity listener error', error: error);
-        },
-      ),
+    _userChatsSubscription = _chatService.getUserChats(currentUserId.value).listen(
+          (chats) {
+        userChats.value = chats;
+      },
+      onError: (error) {
+        _logger.e('Error in user chats stream', error: error);
+      },
     );
   }
 
-
-  void _retryFailedOperations() {
-    // Retry loading data after network restoration
-    if (currentUserId.value.isNotEmpty) {
-      _loadInitialData();
-    }
-  }
 
   @override
   void onClose() {
@@ -183,6 +110,7 @@ class ChatController extends GetxController {
     for (var subscription in _subscriptions) {
       subscription.cancel();
     }
+    _userChatsSubscription?.cancel();
     _typingTimer?.cancel();
     messageController.dispose();
     searchController.dispose();
@@ -190,27 +118,23 @@ class ChatController extends GetxController {
     super.onClose();
   }
 
-  void _initializeUser() {
-    // Set current user ID from constructor or FirebaseAuth
+  void _setupSubscriptions() {
+    // Step 1: Initialize currentUserId
     final authUserId = _auth.currentUser?.uid;
     if (userId.isNotEmpty) {
       currentUserId.value = userId;
     } else if (authUserId != null) {
       currentUserId.value = authUserId;
     }
-  }
 
-  void _setupSubscriptions() {
-    // Listen to current user changes
+    // Step 2: Subscribe to current user changes
     if (currentUserId.value.isNotEmpty) {
       _subscriptions.add(
         _userService.getCurrentUserStream().listen(
               (user) {
             if (user != null) {
               currentUser.value = user;
-              if (currentUserId.value.isEmpty) {
-                currentUserId.value = user.uid;
-              }
+              _listenToUserChats();
               _loadInitialData();
             }
           },
@@ -220,10 +144,12 @@ class ChatController extends GetxController {
         ),
       );
     } else {
-      // If we have a userId, load the user data directly
+      // Fallback: load user data if currentUserId not set
       _loadUserData();
+      _listenToUserChats();
     }
 
+    // Step 3: Setup search listener
     _searchListener = () {
       final query = searchController.text.trim();
       if (query.length >= 2) {
@@ -232,12 +158,19 @@ class ChatController extends GetxController {
         searchResults.clear();
       }
     };
-
     searchController.addListener(_searchListener);
 
-    // Listen to typing status
+    // Step 4: Typing listener
     messageController.addListener(_onTypingChanged);
+
+    // Step 5: Resubscribe chats when currentUserId changes later
+    ever<String>(currentUserId, (id) {
+      if (id.isNotEmpty) {
+        _listenToUserChats();
+      }
+    });
   }
+
 
   void _onTypingChanged() {
     if (peerId == null) return;
@@ -282,9 +215,9 @@ class ChatController extends GetxController {
 
   Future<void> _loadUserData() async {
     try {
-      final userData = await getUserData(currentUserId.value);
+      final userData = await _chatService.getUserData(currentUserId.value);
       if (userData != null) {
-        currentUser.value = UserModel.fromMap(userData);
+        currentUser.value =userData;
         _loadInitialData();
       }
     } catch (e) {
@@ -292,24 +225,24 @@ class ChatController extends GetxController {
     }
   }
 
-  Future<Map<String, dynamic>?> getUserData(String userId) async {
-    if (userId.isEmpty) return null;
-
-    try {
-      final doc = await _firestore.collection('users').doc(userId).get();
-      if (doc.exists) {
-        return {...doc.data() as Map<String, dynamic>, 'uid': doc.id};
-      } else {
-        return null;
-      }
-    } on FirebaseException catch (e) {
-      _logger.e('Firebase error getting user data', error: e);
-      return null;
-    } catch (e) {
-      _logger.e('Unexpected error getting user data', error: e);
-      return null;
-    }
-  }
+  // Future<Map<String, dynamic>?> getUserData(String userId) async {
+  //   if (userId.isEmpty) return null;
+  //
+  //   try {
+  //     final doc = await _firestore.collection('users').doc(userId).get();
+  //     if (doc.exists) {
+  //       return {...doc.data() as Map<String, dynamic>, 'uid': doc.id};
+  //     } else {
+  //       return null;
+  //     }
+  //   } on FirebaseException catch (e) {
+  //     _logger.e('Firebase error getting user data', error: e);
+  //     return null;
+  //   } catch (e) {
+  //     _logger.e('Unexpected error getting user data', error: e);
+  //     return null;
+  //   }
+  // }
 
   Future<void> _loadInitialData() async {
     if (currentUserId.value.isEmpty) return;
@@ -318,12 +251,11 @@ class ChatController extends GetxController {
       isLoading.value = true;
       await Future.wait([
         _loadUsers(),
-        loadFriends(),
-        _listenToFriendRequests(),
+        fetchFriendRequests(),
       ]);
     } catch (e) {
       _logger.e('Error loading initial data', error: e);
-      _showErrorSnackbar('Failed to load initial data');
+      common.showSnackbar('Error', 'Failed to load users', Colors.red);
     } finally {
       isLoading.value = false;
     }
@@ -343,121 +275,69 @@ class ChatController extends GetxController {
       );
     } on FirebaseException catch (e) {
       _logger.e('Firebase error loading users', error: e);
-      _showErrorSnackbar('Failed to load users');
+      common.showSnackbar('Error', 'Failed to load users', Colors.red);
+
     } catch (e) {
       _logger.e('Unexpected error loading users', error: e);
       rethrow;
     }
   }
 
-  // Load current user's friends
-  Future<void> loadFriends() async {
-    try {
-      final userId = currentUserId.value;
-      if (userId.isEmpty) return;
-
-      final userDoc = await _firestore.collection('users').doc(userId).get();
-      if (!userDoc.exists) return;
-
-      final userData = userDoc.data() as Map<String, dynamic>? ?? {};
-      final friendIds = List<String>.from(
-        userData['friends'] as List<dynamic>? ?? [],
-      );
-
-      if (friendIds.isNotEmpty) {
-        final friendsSnapshot = await _firestore
-            .collection('users')
-            .where(FieldPath.documentId, whereIn: friendIds)
-            .get();
-
-        friends.value = friendsSnapshot.docs
-            .map((doc) => UserModel.fromMap({...doc.data(), 'uid': doc.id}))
-            .toList();
-      } else {
-        friends.clear();
-      }
-    } on FirebaseException catch (e) {
-      _logger.e('Firebase error loading friends', error: e);
-      _showErrorSnackbar('Failed to load friends');
-    } catch (e) {
-      _logger.e('Unexpected error loading friends', error: e);
-      rethrow;
-    }
-  }
-
-  // Listen to friend requests
-  Future<void> _listenToFriendRequests() async {
+  Future<void> fetchFriendRequests() async {
     final userId = currentUserId.value;
     if (userId.isEmpty) return;
 
-    _subscriptions.add(
-      _firestore
-          .collection('users')
-          .doc(userId)
-          .snapshots()
-          .listen(
-            (doc) async {
-          if (!doc.exists) return;
-
-          final data = doc.data() as Map<String, dynamic>? ?? {};
-          final requests = List<String>.from(
-            data['friendRequests'] as List<dynamic>? ?? [],
-          );
-
-          if (requests.isNotEmpty) {
-            await _loadFriendRequests(requests);
-          } else {
-            friendRequests.clear();
-          }
-          friendRequestIds.value = requests;
-        },
-        onError: (error) {
-          _logger.e('Error in friend requests stream', error: error);
-        },
-      ),
-    );
-  }
-
-  // Load friend requests
-  Future<void> _loadFriendRequests(List<String> requests) async {
     try {
-      if (requests.isEmpty) {
+      // 1️⃣ Get current user's friend request IDs
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (!userDoc.exists) {
         friendRequests.clear();
         return;
       }
 
+      final requestIds = List<String>.from(
+          (userDoc.data()?['friendRequests'] as List<dynamic>? ?? [])
+      );
+
+      if (requestIds.isEmpty) {
+        friendRequests.clear();
+        return;
+      }
+
+      // 2️⃣ Fetch full UserModel for each request
       final requestsSnapshot = await _firestore
           .collection('friend_requests')
-          .where(FieldPath.documentId, whereIn: requests)
+          .where(FieldPath.documentId, whereIn: requestIds)
           .get();
 
       final loadedRequests = <UserModel>[];
       for (final doc in requestsSnapshot.docs) {
-        final data = doc.data();
-        final senderId = data['senderId'] as String?;
-
+        final senderId = doc.data()['senderId'] as String?;
         if (senderId != null) {
-          final senderData = await getUserData(senderId);
+          final senderData = await _chatService.getUserData(senderId);
           if (senderData != null) {
-            loadedRequests.add(UserModel.fromMap(senderData));
+            loadedRequests.add(senderData);
           }
         }
       }
 
+      // 3️⃣ Assign to observable list
       friendRequests.value = loadedRequests;
+
     } on FirebaseException catch (e) {
-      _logger.e('Firebase error loading friend requests', error: e);
-      _showErrorSnackbar('Failed to load friend requests');
+      _logger.e('Firebase error fetching friend requests', error: e);
+      friendRequests.clear();
     } catch (e) {
-      _logger.e('Unexpected error loading friend requests', error: e);
-      rethrow;
+      _logger.e('Unexpected error fetching friend requests', error: e);
+      friendRequests.clear();
     }
   }
+
 
   // Send friend request
   Future<void> sendFriendRequest(String receiverEmail) async {
     if (receiverEmail.trim().isEmpty) {
-      _showErrorSnackbar('Please enter an email address');
+      common.showSnackbar('Error', 'Please enter an email address', Colors.red);
       return;
     }
 
@@ -472,7 +352,8 @@ class ChatController extends GetxController {
           .get();
 
       if (usersSnapshot.docs.isEmpty) {
-        _showErrorSnackbar('User not found with this email');
+        common.showSnackbar('Error', 'User not found with this email', Colors.red);
+
         return;
       }
 
@@ -480,7 +361,7 @@ class ChatController extends GetxController {
 
       // Don't allow sending request to self
       if (receiverId == currentUserId.value) {
-        _showErrorSnackbar('You cannot send a friend request to yourself');
+        common.showSnackbar('Error', 'You cannot send a friend request to yourself', Colors.red);
         return;
       }
 
@@ -496,7 +377,7 @@ class ChatController extends GetxController {
         );
 
         if (friends.contains(receiverId)) {
-          _showInfoSnackbar('This user is already your friend');
+          common.showSnackbar('Info', 'This user is already your friend', Colors.blue);
           return;
         }
       }
@@ -511,7 +392,7 @@ class ChatController extends GetxController {
           .get();
 
       if (existingRequest.docs.isNotEmpty) {
-        _showInfoSnackbar('Friend request already sent');
+        common.showSnackbar('Info', 'Friend request already sent', Colors.blue);
         return;
       }
 
@@ -530,174 +411,37 @@ class ChatController extends GetxController {
       await _firestore.collection('users').doc(receiverId).update({
         'friendRequests': FieldValue.arrayUnion([requestRef.id]),
       });
-
-      _showSuccessSnackbar('Friend request sent successfully');
+      highlightedUserId.value = receiverId;
+   common.showSnackbar('Success', 'Friend request sent!', Colors.green);
       emailController.clear();
     } on FirebaseException catch (e) {
       _logger.e('Firebase error sending friend request', error: e);
-      _showErrorSnackbar('Failed to send friend request: ${e.message}');
+      common.showSnackbar('Error', 'Failed to send friend request: ${e.message}', Colors.red);
+
     } catch (e) {
       _logger.e('Unexpected error sending friend request', error: e);
-      _showErrorSnackbar('An unexpected error occurred');
+      common.showSnackbar('Error', 'An unexpected error occurred', Colors.red);
     } finally {
       isLoading.value = false;
     }
   }
 
-  // Accept friend request
-  Future<void> acceptFriendRequest(String requestId, String senderId) async {
-    try {
-      isLoading.value = true;
-      final batch = _firestore.batch();
-
-      // Update friend request status
-      final requestRef = _firestore.collection('friend_requests').doc(requestId);
-      batch.update(requestRef, {
-        'status': 'accepted',
-        'acceptedAt': FieldValue.serverTimestamp(),
-      });
-
-      // Add to current user's friends
-      final currentUserRef = _firestore.collection('users').doc(currentUserId.value);
-      batch.update(currentUserRef, {
-        'friends': FieldValue.arrayUnion([senderId]),
-        'friendRequests': FieldValue.arrayRemove([requestId]),
-      });
-
-      // Add to sender's friends
-      final senderRef = _firestore.collection('users').doc(senderId);
-      batch.update(senderRef, {
-        'friends': FieldValue.arrayUnion([currentUserId.value]),
-      });
-
-      await batch.commit();
-
-      // Reload friends and requests
-      await Future.wait([loadFriends(), _listenToFriendRequests()]);
-
-      _showSuccessSnackbar('Friend request accepted');
-    } on FirebaseException catch (e) {
-      _logger.e('Firebase error accepting friend request', error: e);
-      _showErrorSnackbar('Failed to accept friend request');
-    } catch (e) {
-      _logger.e('Unexpected error accepting friend request', error: e);
-      _showErrorSnackbar('An unexpected error occurred');
-    } finally {
-      isLoading.value = false;
-    }
-  }
-
-  // Reject friend request
-  Future<void> rejectFriendRequest(String requestId) async {
-    try {
-      isLoading.value = true;
-      final batch = _firestore.batch();
-
-      // Update friend request status
-      final requestRef = _firestore.collection('friend_requests').doc(requestId);
-      batch.update(requestRef, {
-        'status': 'rejected',
-        'rejectedAt': FieldValue.serverTimestamp(),
-      });
-
-      // Remove from current user's friend requests
-      final currentUserRef = _firestore.collection('users').doc(currentUserId.value);
-      batch.update(currentUserRef, {
-        'friendRequests': FieldValue.arrayRemove([requestId]),
-      });
-
-      await batch.commit();
-      _showInfoSnackbar('Friend request rejected');
-    } on FirebaseException catch (e) {
-      _logger.e('Firebase error rejecting friend request', error: e);
-      _showErrorSnackbar('Failed to reject friend request');
-    } catch (e) {
-      _logger.e('Unexpected error rejecting friend request', error: e);
-      _showErrorSnackbar('An unexpected error occurred');
-    } finally {
-      isLoading.value = false;
-    }
-  }
-
-  // Set current chat
-  void setCurrentChat(String chatId, UserModel peer) {
-    currentChatId.value = chatId;
-    currentPeer.value = peer;
-    messages.clear();
-    _listenMessages();
-    _listenTypingStatus();
-  }
-
-  // Listen to messages for current chat
-  void _listenMessages() {
-    if (currentPeer.value == null) return;
-
-    final stream = _chatService.getMessages(
-      currentUserId: currentUserId.value,
-      otherUserId: currentPeer.value!.uid,
-    );
-
-    _subscriptions.add(
-      stream.listen(
-            (messageList) {
-          messages.value = messageList;
-        },
-        onError: (error) {
-          _logger.e('Error in messages stream', error: error);
-        },
-      ),
-    );
-  }
-
-  // Listen to typing status
-  void _listenTypingStatus() {
-    if (currentPeer.value == null) return;
-
-    final chatId = _chatService.getChatId(currentUserId.value, currentPeer.value!.uid);
-
-    _subscriptions.add(
-      _firestore
-          .collection('chats')
-          .doc(chatId)
-          .collection('typing')
-          .where('userId', isNotEqualTo: currentUserId.value)
-          .snapshots()
-          .listen(
-            (snapshot) {
-          final typingData = <String, bool>{};
-          for (final doc in snapshot.docs) {
-            final data = doc.data();
-            final userId = data['userId'] as String?;
-            final isTyping = data['isTyping'] as bool? ?? false;
-            final timestamp = data['timestamp'] as Timestamp?;
-
-            if (userId != null && timestamp != null) {
-              // Consider typing status expired after 5 seconds
-              final now = DateTime.now();
-              final typingTime = timestamp.toDate();
-              final isRecent = now.difference(typingTime).inSeconds < 5;
-
-              typingData[userId] = isTyping && isRecent;
-            }
-          }
-          typingUsers.value = typingData;
-        },
-        onError: (error) {
-          _logger.e('Error in typing status stream', error: error);
-        },
-      ),
-    );
-  }
-
-  // Send message to a specific user
   Future<void> sendMessageToUser(String receiverId, String message) async {
+    if (receiverId.isEmpty || message.trim().isEmpty) {
+      common.showSnackbar('Error', 'Invalid message data', Colors.red);
+      return;
+    }
 
-    if (receiverId.isEmpty || message.trim().isEmpty) return;
+    if (currentUserId.value.isEmpty) {
+      common.showSnackbar('Error', 'User not authenticated', Colors.red);
+      return;
+    }
 
     try {
       isSendingMessage.value = true;
 
-      await _chatService.sendMessage(
+      // Create the message model first
+      final messageModel = await _chatService.sendMessage(
         senderId: currentUserId.value,
         receiverId: receiverId,
         message: message.trim(),
@@ -705,20 +449,21 @@ class ChatController extends GetxController {
         senderPhotoUrl: currentUser.value?.photoUrl,
       );
 
+      _logger.i('Message sent successfully: ${messageModel.id}');
+
     } on FirebaseException catch (e) {
       _logger.e('Firebase error sending message to user', error: e);
-      _showErrorSnackbar('Failed to send message: ${e.message}');
+      common.showSnackbar('Error', 'Failed to send message: ${e.message}', Colors.red);
       rethrow;
     } catch (e) {
       _logger.e('Unexpected error sending message to user', error: e);
-      _showErrorSnackbar('Failed to send message');
+      common.showSnackbar('Error', 'Failed to send message', Colors.red);
       rethrow;
     } finally {
       isSendingMessage.value = false;
     }
   }
 
-  // Search for users
   Future<void> searchUsers(String query) async {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
@@ -728,64 +473,22 @@ class ChatController extends GetxController {
 
     try {
       isLoading.value = true;
-
       final results = await _chatService.searchUsers(
         trimmedQuery,
         excludeUserId: currentUserId.value,
       );
-
       searchResults.value = results;
     } on FirebaseException catch (e) {
       _logger.e('Firebase error searching users', error: e);
-      _showErrorSnackbar('Failed to search users');
+      common.showSnackbar('Error', 'Failed to search users', Colors.red);
       searchResults.clear();
     } catch (e) {
-      _logger.e('Error searching users', error: e);
-      _showErrorSnackbar('An unexpected error occurred while searching');
+      _logger.e('Unexpected error searching users', error: e);
+      common.showSnackbar('Error', 'Unexpected error occurred', Colors.red);
       searchResults.clear();
     } finally {
       isLoading.value = false;
     }
-  }
-
-  // Helper methods for showing snackbars
-  void _showSuccessSnackbar(String message) {
-    Get.snackbar(
-      'Success',
-      message,
-      backgroundColor: Colors.green.withOpacity(0.8),
-      colorText: Colors.white,
-      snackPosition: SnackPosition.BOTTOM,
-      margin: const EdgeInsets.all(16),
-      borderRadius: 12,
-      duration: const Duration(seconds: 2),
-    );
-  }
-
-  void _showErrorSnackbar(String message) {
-    Get.snackbar(
-      'Error',
-      message,
-      backgroundColor: Colors.red.withOpacity(0.8),
-      colorText: Colors.white,
-      snackPosition: SnackPosition.BOTTOM,
-      margin: const EdgeInsets.all(16),
-      borderRadius: 12,
-      duration: const Duration(seconds: 2),
-    );
-  }
-
-  void _showInfoSnackbar(String message) {
-    Get.snackbar(
-      'Info',
-      message,
-      backgroundColor: Colors.blue.withOpacity(0.8),
-      colorText: Colors.white,
-      snackPosition: SnackPosition.BOTTOM,
-      margin: const EdgeInsets.all(16),
-      borderRadius: 12,
-      duration: const Duration(seconds: 3),
-    );
   }
 
   // Clean up method
@@ -829,12 +532,12 @@ class ChatController extends GetxController {
 
       Get.offAll(()=> LoginPage());
 
-      _logger.i("User signed out successfully");
+      _logger.i('User signed out successfully');
     } catch (e) {
-      _logger.e("Error during sign out", error: e);
+      _logger.e('Error during sign out', error: e);
       Get.snackbar(
-        "Error",
-        "Failed to sign out. Please try again.",
+        'Error',
+        'Failed to sign out. Please try again.',
         snackPosition: SnackPosition.BOTTOM,
       );
     }

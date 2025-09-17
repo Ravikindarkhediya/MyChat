@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:get/get.dart';
 import 'package:logger/logger.dart';
 
@@ -14,11 +13,14 @@ class ChatService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final _logger = Logger();
 
-  // Get chatId from two userIds (always same order)
   String getChatId(String user1, String user2) {
-    return user1.hashCode <= user2.hashCode
-        ? '${user1}_$user2'
-        : '${user2}_$user1';
+    if (user1.isEmpty || user2.isEmpty) {
+      throw ArgumentError('User IDs cannot be empty');
+    }
+
+    // Always put the lexicographically smaller ID first for consistency
+    final sortedUsers = [user1, user2]..sort();
+    return '${sortedUsers[0]}_${sortedUsers[1]}';
   }
 
   Future<MessageModel> sendMessage({
@@ -66,7 +68,7 @@ class ChatService {
 
       // Update the last message in the chat summary
       batch.set(
-        _db.collection("chats").doc(chatId),
+        _db.collection('chats').doc(chatId),
         {
           'participants': [senderId, receiverId],
           'lastMessage': message,
@@ -115,12 +117,12 @@ class ChatService {
           .doc(chatId)
           .collection("messages")
           .where('receiverId', isEqualTo: userId)
-          .where('read', isEqualTo: false)
+          .where('isRead', isEqualTo: false)
           .get();
       
       final batch = _db.batch();
       for (var doc in messages.docs) {
-        batch.update(doc.reference, {'read': true, 'status': 'read'});
+        batch.update(doc.reference, {'isRead': true, 'status': 'read'});
       }
       
       await batch.commit();
@@ -144,34 +146,31 @@ class ChatService {
     // Mark messages as read when we start listening
     markMessagesAsRead(chatId, currentUserId);
 
-    return _db.collection("chats")
+    return _db.collection('chats')
         .doc(chatId)
-        .collection("messages")
-        .orderBy("timestamp", descending: true)
+        .collection('messages')
+        .orderBy('timestamp', descending: true)
         .limit(limit)
         .snapshots()
         .map((snapshot) => snapshot.docs
             .map((doc) => MessageModel.fromMap({
-                  ...doc.data() as Map<String, dynamic>,
+                  ...doc.data(),
                   'id': doc.id,
                 }))
             .toList()
               ..sort((a, b) => a.timestamp.compareTo(b.timestamp)));
   }
   
-  /// Returns a stream of chat summaries for a user
-  /// 
-  /// Each summary includes the last message and unread count
   Stream<List<ChatSummary>> getUserChats(String userId) {
     if (userId.isEmpty) return const Stream.empty();
     
-    return _db.collection("chats")
+    return _db.collection('chats')
         .where('participants', arrayContains: userId)
         .orderBy('updatedAt', descending: true)
         .snapshots()
         .map((snapshot) => snapshot.docs
             .map((doc) => ChatSummary.fromMap({
-                  ...doc.data() as Map<String, dynamic>,
+                  ...doc.data(),
                   'id': doc.id,
                 }))
             .toList());
@@ -194,9 +193,7 @@ class ChatService {
     }
   }
   
-  /// Searches for users by name or email
-  /// 
-  /// Returns a list of users matching the query
+
   Future<List<UserModel>> searchUsers(String query, {String? excludeUserId}) async {
     if (query.isEmpty) return [];
     
@@ -242,10 +239,7 @@ class ChatService {
       return [];
     }
   }
-  
-  /// Sends a push notification to a user
-  /// 
-  /// This is a placeholder - implement with your preferred push notification service
+
   Future<void> _sendPushNotification(
     String receiverId, 
     String senderName, 
@@ -260,30 +254,8 @@ class ChatService {
         Get.log('No FCM token found for user $receiverId');
         return;
       }
-      
-      // TODO: Implement actual FCM message sending
-      // This is a placeholder for the actual implementation
-      Get.log('Sending push notification to $receiverId: $message');
-      
-      // Example implementation (uncomment and implement as needed):
-      /*
-      await FirebaseMessaging.instance.sendMessage(
-        to: fcmToken,
-        notification: FirebaseNotification(
-          title: 'New message from $senderName',
-          body: message,
-        ),
-        data: {
-          'type': 'new_message',
-          'senderId': _auth.currentUser?.uid ?? '',
-          'senderName': senderName,
-          'message': message,
-        },
-      );
-      */
     } catch (e) {
       Get.log('Error sending push notification: $e');
-      // Don't throw - failing to send a notification shouldn't fail the message send
     }
   }
   
