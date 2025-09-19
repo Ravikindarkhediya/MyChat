@@ -32,31 +32,31 @@ dependencies:
     sdk: flutter
 
   # Firebase
-  firebase_core: ^2.24.2
-  firebase_auth: ^4.15.0
-  cloud_firestore: ^4.13.6
-  firebase_storage: ^11.5.6
-  firebase_messaging: ^14.7.5
+  firebase_core: ^4.1.0
+  firebase_auth: ^6.0.2
+  cloud_firestore: ^6.0.1
+  firebase_storage: ^13.0.1
+  firebase_messaging: ^16.0.1
   
   # State Management
   get: ^4.6.5
   
   # Authentication
-  google_sign_in: ^6.1.6
+  google_sign_in: ^6.3.0
 #  sign_in_with_apple: ^5.0.0
   connectivity_plus: ^6.0.5
   # UI Components
   cupertino_icons: ^1.0.8
-  lottie: ^2.7.0
+  lottie: ^3.3.2
   cached_network_image: ^3.3.0
   shimmer: ^3.0.0
   google_fonts: ^6.1.0
-  intl: ^0.19.0
+  intl: ^0.20.2
   url_launcher: ^6.2.2
   image_picker: ^1.0.7
   path_provider: ^2.1.1
   path: ^1.8.3
-  mime: ^1.0.4
+  mime: ^2.0.0
   flutter_svg: ^2.0.10+1
   flutter_cache_manager: ^3.3.1
   collection:
@@ -66,24 +66,25 @@ dependencies:
   equatable: ^2.0.5
   logger: ^2.0.2
   timeago: ^3.6.3
-  share_plus: ^7.2.1
-  permission_handler: ^11.2.0
+  share_plus: ^12.0.0
+  permission_handler: ^12.0.1
   
   # Ads
-  google_mobile_ads: ^4.0.0
-  
+  google_mobile_ads: ^6.0.0
+
+  jitsi_meet_flutter_sdk: 11.4.0
   # Emoji Picker
-  emoji_picker_flutter: ^2.1.1
+  emoji_picker_flutter: ^4.3.0
   
   # Audio/Video
-  just_audio: ^0.9.36
+  just_audio: ^0.10.5
   video_player: ^2.8.1
   chewie: ^1.4.5
   
   # Maps & Location
   google_maps_flutter: ^2.5.3
-  geolocator: ^10.1.0
-  geocoding: ^2.1.1
+  geolocator: ^14.0.2
+  geocoding: ^4.0.0
   
   # Contacts
   flutter_contacts: ^1.1.7
@@ -95,7 +96,7 @@ dependencies:
   # WebRTC
   flutter_webrtc: ^1.1.0
   record: ^6.0.0
-  file_picker: ^8.0.7
+  file_picker: ^10.3.3
 
 dev_dependencies:
   flutter_test:

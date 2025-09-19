@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:ads_demo/view/login_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:logger/logger.dart';
 import '../constant/common.dart';
 import '../models/friend_request_model.dart';
@@ -226,7 +229,7 @@ class ChatController extends GetxController {
     );
     
     if (index != -1) {
-      userChats[index] = userChats[index].copyWith(lastMessage: 'No message yet');
+      userChats[index] = userChats[index].copyWith(lastMessage: '');
       userChats.refresh();
     }
   }
@@ -651,6 +654,20 @@ class ChatController extends GetxController {
     _subscriptions.clear();
   }
 
+  // send a image to specific friend
+  Future<void> uploadSmallImage(String userId) async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile == null) return;
+
+    final file = File(pickedFile.path);
+    final bytes = await file.readAsBytes();
+    final base64Image = base64Encode(bytes);
+
+    await FirebaseFirestore.instance.collection('users').doc(userId).update({
+      'photoBase64': base64Image,
+    });
+  }
   Future<void> signOut() async {
     try {
       for (var sub in _subscriptions) {

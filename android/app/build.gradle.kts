@@ -1,16 +1,13 @@
 plugins {
     id("com.android.application")
-    // START: FlutterFire Configuration
     id("com.google.gms.google-services")
-    // END: FlutterFire Configuration
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
     namespace = "com.example.ads_demo"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -25,10 +22,11 @@ android {
 
     defaultConfig {
         applicationId = "com.example.ads_demo"
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        minSdk = 26
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        multiDexEnabled = true
     }
 
     buildTypes {
@@ -38,6 +36,12 @@ android {
     }
 }
 
+// Exclude conflicting transitive libs brought by jitsi-meet/react-native-video
+configurations.configureEach {
+    exclude(group = "org.jitsi", module = "webrtc")
+    exclude(group = "androidx.media3", module = "media3-exoplayer-rtsp")
+}
+
 flutter {
     source = "../.."
 }
@@ -45,7 +49,6 @@ flutter {
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("com.google.android.material:material:1.9.0")
-
-    // ✅ Use latest desugar_jdk_libs (>= 2.1.4 required by flutter_local_notifications 19.x)
+    implementation("androidx.multidex:multidex:2.0.1")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

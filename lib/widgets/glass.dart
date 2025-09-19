@@ -175,58 +175,6 @@ class GlassInfoCard extends StatelessWidget {
 }
 
 
-// class GlassCard extends StatelessWidget {
-//   final Widget child;
-//   final EdgeInsetsGeometry? padding;
-//
-//   const GlassCard({
-//     super.key,
-//     required this.child,
-//     this.padding,
-//   });
-//
-//   @override
-//   Widget build(BuildContext context) {
-//     return TweenAnimationBuilder<double>(
-//       duration: const Duration(milliseconds: 1000),
-//       tween: Tween(begin: 0.8, end: 1.0),
-//       curve: Curves.easeOutBack,
-//       child: child,
-//       builder: (context, value, child) {
-//         return Transform.scale(
-//           scale: value,
-//           child: ClipRRect(
-//             borderRadius: BorderRadius.circular(12),
-//             child: BackdropFilter(
-//               filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-//               child: Padding(
-//                 padding: padding ?? const EdgeInsets.all(10),
-//                 child: Container(
-//                   constraints: const BoxConstraints(minWidth: 0, minHeight: 0),
-//                   decoration: BoxDecoration(
-//                     borderRadius: BorderRadius.circular(12),
-//                     border: Border.all(color: Colors.white.withOpacity(0.2)),
-//                     gradient: LinearGradient(
-//                       colors: [
-//                         Colors.white.withOpacity(0.15),
-//                         Colors.white.withOpacity(0.3),
-//                       ],
-//                       begin: Alignment.topLeft,
-//                       end: Alignment.bottomRight,
-//                     ),
-//                   ),
-//                   child: child,
-//                 ),
-//               ),
-//             ),
-//           ),
-//         );
-//       },
-//     );
-//   }
-// }
-
-
 class GlassContainer extends StatelessWidget {
   final Widget child;
   final double? width;

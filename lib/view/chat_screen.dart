@@ -1,11 +1,9 @@
 import 'dart:ui';
 import 'package:ads_demo/constant/common.dart';
+import 'package:ads_demo/services/calling_service.dart';
 import 'package:ads_demo/services/chat_services.dart';
 import 'package:ads_demo/services/user_service.dart';
-import 'package:ads_demo/view/home_page.dart';
-import 'package:ads_demo/widgets/glass.dart';
 import 'package:animated_background/animated_background.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -14,7 +12,8 @@ import '../controller/chat_controller.dart';
 import '../models/message_model.dart';
 import '../models/user_model.dart';
 import '../widgets/chat_bubble.dart';
-import '../widgets/particle_pointers.dart';
+import '../widgets/glass.dart';
+import 'home_page.dart';
 
 class ChatScreen extends StatefulWidget {
   final UserModel? peerUser;
@@ -30,8 +29,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   final ChatController _chatController = Get.find<ChatController>();
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final ChatService _chatService = ChatService();
   final FocusNode _focusNode = FocusNode();
+  final ChatService _chatService = ChatService();
   final UserService userService = UserService();
 
   bool _isEmojiVisible = false;
@@ -45,6 +44,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   late Animation<Offset> _slideAnimation;
 
   // General Variables
+  int _behaviourIndex = 0;
   Behaviour? _behaviour;
 
   @override
@@ -84,32 +84,17 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
   }
 
-  // Replace the _initializeChat method in ChatScreen with this:
-
   Future<void> _initializeChat() async {
     setState(() => _isLoading = true);
 
     try {
       if (widget.peerUser != null) {
         _peerUser = widget.peerUser;
-      } else if (widget.chatId != null) {
-        // If we have chatId but no peer user, extract peer ID from chatId
-        final chatIdParts = widget.chatId!.split('_');
-        if (chatIdParts.length == 2) {
-          final currentUserId = _chatController.currentUserId.value;
-          final peerUserId = chatIdParts[0] == currentUserId
-              ? chatIdParts[1]
-              : chatIdParts[0];
-
-          final userData = await _chatService.getUserData(peerUserId);
-          if (userData != null) {
-            _peerUser = userData;
-          }
+      } else if (widget.peerUser?.uid != null) {
+        final userData = await _chatService.getUserData(widget.peerUser!.uid);
+        if (userData != null) {
+          _peerUser = userData;
         }
-      }
-
-      if (_peerUser == null) {
-        throw Exception('Unable to load peer user data');
       }
     } catch (e) {
       Get.snackbar(
@@ -170,6 +155,47 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       setState(() => _isTyping = true);
     }
   }
+
+  // Widget _buildGlassContainer({
+  //   required Widget child,
+  //   double? width,
+  //   double? height,
+  //   EdgeInsetsGeometry? margin,
+  //   EdgeInsetsGeometry? padding,
+  //   double borderRadius = 16,
+  //   double opacity = 0.15,
+  // }) {
+  //   return Container(
+  //     width: width,
+  //     height: height,
+  //     margin: margin,
+  //     child: ClipRRect(
+  //       borderRadius: BorderRadius.circular(borderRadius),
+  //       child: BackdropFilter(
+  //         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+  //         child: Container(
+  //           padding: padding,
+  //           decoration: BoxDecoration(
+  //             gradient: LinearGradient(
+  //               begin: Alignment.topLeft,
+  //               end: Alignment.bottomRight,
+  //               colors: [
+  //                 Colors.white.withOpacity(opacity),
+  //                 Colors.white.withOpacity(opacity * 0.5),
+  //               ],
+  //             ),
+  //             borderRadius: BorderRadius.circular(borderRadius),
+  //             border: Border.all(
+  //               color: Colors.white.withOpacity(0.2),
+  //               width: 1.5,
+  //             ),
+  //           ),
+  //           child: child,
+  //         ),
+  //       ),
+  //     ),
+  //   );
+  // }
 
   Widget _buildMessageList() {
     return StreamBuilder<List<MessageModel>>(
@@ -240,6 +266,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         }
 
         final messages = snapshot.data ?? [];
+
         if (messages.isEmpty) {
           return Center(
             child: FadeTransition(
@@ -296,9 +323,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         }
 
         return ListView.builder(
+          reverse: true,
           controller: _scrollController,
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
-          reverse: true,
           itemCount: messages.length,
           itemBuilder: (context, index) {
             final message = messages[index];
@@ -310,7 +337,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               child: ChatBubble(
                 message: message,
                 isMe: isMe,
-                showTime: true, // Always show time for better UI
+                showTime:
+                    index == 0 ||
+                    index == messages.length - 1 ||
+                    (index > 0 &&
+                        messages[index - 1].senderId != message.senderId),
                 showStatus:
                     isMe &&
                     (index == 0 ||
@@ -373,7 +404,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             _buildActionButton(
               icon: Icons.camera_alt_rounded,
               onPressed: () {
-                // TODO: Implement camera
+                print(_peerUser!.uid);
+                _chatController.uploadSmallImage(_peerUser!.uid);
               },
             ),
 
@@ -382,7 +414,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               duration: const Duration(milliseconds: 200),
               child: _buildActionButton(
                 icon: _isTyping ? Icons.send_rounded : Icons.mic_rounded,
-                onPressed: _isTyping ? _sendMessage : () {},
+                onPressed: _isTyping
+                    ? _sendMessage
+                    : () {
+                        // TODO: Implement voice message
+                      },
                 isHighlighted: _isTyping,
               ),
             ),
@@ -426,6 +462,44 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               size: 22,
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAttachmentOption({
+    required IconData icon,
+    required String label,
+    required List<Color> gradient,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: gradient),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: Colors.white, size: 24),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: GoogleFonts.poppins(
+                color: Colors.white.withOpacity(0.8),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -611,7 +685,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   // TODO: Implement video call
                 }),
                 _buildAppBarAction(Icons.call_rounded, () {
-                  // TODO: Implement voice call
+                  // CallingService().joinMeeting(isAudioOnly: true);
                 }),
                 PopupMenuButton<String>(
                   icon: Icon(
@@ -626,12 +700,16 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                         // TODO: Implement mute notifications
                         break;
                       case 'clear_chat':
-                        final success = await _chatService.softDeleteChatForUser(
-                          currentUserId: _chatController.currentUserId.value,
-                          friendUserId: widget.peerUser?.uid ?? '',
-                        );
+                        final success = await _chatService
+                            .softDeleteChatForUser(
+                              currentUserId:
+                                  _chatController.currentUserId.value,
+                              friendUserId: widget.peerUser?.uid ?? '',
+                            );
                         if (success) {
-                          _chatController.clearChatMessages(widget.peerUser?.uid ?? '');
+                          _chatController.clearChatMessages(
+                            widget.peerUser?.uid ?? '',
+                          );
                           _chatController.updateUserChats();
                         }
                         break;
@@ -647,7 +725,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                             'Delete User',
                             Colors.green,
                           );
-                          Get.to(()=> HomePage());
+                          Get.to(() => HomePage());
                         } else {
                           Get.snackbar(
                             'Error',
@@ -671,7 +749,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                       'Clear Chat',
                     ),
                     _buildPopupMenuItem(
-                      'delete',
+                      'block',
                       Icons.block_rounded,
                       'Delete User',
                     ),
@@ -697,7 +775,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             children: [
               // Messages list
               Expanded(
-                child: _buildMessageList(),
+                child: Stack(
+                  children: [
+                    // Messages
+                    _buildMessageList(),
+                  ],
+                ),
               ),
 
               // Emoji picker
