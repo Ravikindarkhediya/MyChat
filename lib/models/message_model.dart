@@ -346,7 +346,7 @@ class ChatSummary {
   /// Creates a ChatSummary from a map of data
   factory ChatSummary.fromMap(Map<String, dynamic> map) {
     final unreadCounts = <String, int>{};
-    
+
     // Extract unread counts
     map.forEach((key, value) {
       if (key.startsWith('unreadCount_')) {

@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:ads_demo/constant/common.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:logger/logger.dart';
 
@@ -140,9 +142,9 @@ class ChatService {
     if (currentUserId.isEmpty || otherUserId.isEmpty) {
       return const Stream.empty();
     }
-    
+
     final chatId = getChatId(currentUserId, otherUserId);
-    
+
     // Mark messages as read when we start listening
     markMessagesAsRead(chatId, currentUserId);
 
@@ -152,18 +154,26 @@ class ChatService {
         .orderBy('timestamp', descending: true)
         .limit(limit)
         .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => MessageModel.fromMap({
-                  ...doc.data(),
-                  'id': doc.id,
-                }))
-            .toList()
-              ..sort((a, b) => a.timestamp.compareTo(b.timestamp)));
+        .map((snapshot) {
+      // Filter out messages deleted for this user
+      final filteredDocs = snapshot.docs.where((doc) {
+        final deletedFor = (doc.data()['deletedFor'] ?? []) as List<dynamic>;
+        return !deletedFor.contains(currentUserId);
+      });
+
+      return filteredDocs
+          .map((doc) => MessageModel.fromMap({
+        ...doc.data(),
+        'id': doc.id,
+      }))
+          .toList()
+        ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    });
   }
-  
+
   Stream<List<ChatSummary>> getUserChats(String userId) {
     if (userId.isEmpty) return const Stream.empty();
-    
+
     return _db.collection('chats')
         .where('participants', arrayContains: userId)
         .orderBy('updatedAt', descending: true)
@@ -174,6 +184,28 @@ class ChatService {
                   'id': doc.id,
                 }))
             .toList());
+  }
+  
+  // स्ट्रीम के बजाय एक बार में यूजर चैट्स प्राप्त करने के लिए मेथड
+  Future<List<ChatSummary>> fetchUserChats(String userId) async {
+    if (userId.isEmpty) return [];
+
+    try {
+      final snapshot = await _db.collection('chats')
+          .where('participants', arrayContains: userId)
+          .orderBy('updatedAt', descending: true)
+          .get();
+          
+      return snapshot.docs
+          .map((doc) => ChatSummary.fromMap({
+                ...doc.data(),
+                'id': doc.id,
+              }))
+          .toList();
+    } catch (e) {
+      _logger.e('Error fetching user chats', error: e);
+      return [];
+    }
   }
 
   Future<UserModel?> getUserData(String userId) async {
@@ -192,7 +224,51 @@ class ChatService {
       return null;
     }
   }
-  
+
+  Future<bool> softDeleteChatForUser({
+    required String currentUserId,
+    required String friendUserId,
+  }) async {
+    if (currentUserId.isEmpty || friendUserId.isEmpty) return false;
+
+    try {
+      final chatId = getChatId(currentUserId, friendUserId);
+      final chatRef = _db.collection('chats').doc(chatId);
+      final messagesRef = chatRef.collection('messages');
+
+      final batch = _db.batch();
+
+      // Mark each message as deleted for current user
+      final messagesSnapshot = await messagesRef.get();
+      for (var doc in messagesSnapshot.docs) {
+        batch.update(doc.reference, {
+          'deletedFor': FieldValue.arrayUnion([currentUserId]),
+        });
+      }
+
+      // Also mark the chat document itself
+      batch.update(chatRef, {
+        'deletedFor': FieldValue.arrayUnion([currentUserId]),
+      });
+
+      await batch.commit();
+
+      Common().showSnackbar(
+        'Success',
+        'Chat cleared from your account',
+        Colors.green,
+      );
+
+      return true;
+    } catch (e) {
+      Common().showSnackbar(
+        'Error',
+        'Failed to clear chat: $e',
+        Colors.red,
+      );
+      return false;
+    }
+  }
 
   Future<List<UserModel>> searchUsers(String query, {String? excludeUserId}) async {
     if (query.isEmpty) return [];
@@ -259,10 +335,6 @@ class ChatService {
     }
   }
   
-  /// Deletes a message
-  /// 
-  /// If [deleteForEveryone] is true, the message is deleted for all participants.
-  /// Otherwise, it's only deleted for the current user.
   Future<void> deleteMessage({
     required String chatId,
     required String messageId,
@@ -295,10 +367,7 @@ class ChatService {
       rethrow;
     }
   }
-  
-  /// Updates a message with new content
-  /// 
-  /// Returns the updated message, or null if the update failed
+
   Future<MessageModel?> updateMessage({
     required String chatId,
     required String messageId,

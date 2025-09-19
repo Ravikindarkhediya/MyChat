@@ -7,8 +7,7 @@ import 'package:get/get.dart';
 import 'package:get/get_navigation/src/snackbar/snackbar.dart';
 import 'package:logger/logger.dart';
 
-class Common{
-
+class Common {
   // Behaviour use for AnimatedBackground
   Behaviour buildBehaviour() {
     return RandomParticleBehaviour(
@@ -24,20 +23,19 @@ class Common{
         spawnMaxRadius: 6.0,
         particleCount: 80,
       ),
-      paint: Paint()
-        ..style = PaintingStyle.fill,
+      paint: Paint()..style = PaintingStyle.fill,
     );
   }
 
-// Network status monitoring
+  // Network status monitoring
   final Logger _logger = Logger();
 
   StreamSubscription setupNetworkListener({
     required RxString currentUserId,
-    required VoidCallback onRestore,
+    required Future<void> Function() onRestore,
   }) {
     return Connectivity().onConnectivityChanged.listen(
-          (result) {
+      (result) async {
         if (result == ConnectivityResult.none) {
           Get.snackbar(
             'Error',
@@ -47,7 +45,7 @@ class Common{
           );
         } else {
           if (currentUserId.value.isNotEmpty) {
-            onRestore();
+            await onRestore(); // 👈 correctly await karega
           }
         }
       },
@@ -56,7 +54,6 @@ class Common{
       },
     );
   }
-
 
   // Helper methods for showing snackbars
   void showSnackbar(String title, String message, Color backgroundColor) {
@@ -71,5 +68,4 @@ class Common{
       duration: const Duration(seconds: 2),
     );
   }
-
 }

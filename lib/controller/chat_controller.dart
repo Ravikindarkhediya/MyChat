@@ -7,6 +7,7 @@ import 'package:get/get.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:logger/logger.dart';
 import '../constant/common.dart';
+import '../models/friend_request_model.dart';
 import '../models/message_model.dart';
 import '../models/user_model.dart';
 import '../services/chat_services.dart';
@@ -49,7 +50,7 @@ class ChatController extends GetxController {
   late VoidCallback _searchListener;
 
   // For friend requests
-  final RxList<UserModel> friendRequests = <UserModel>[].obs;
+  final RxList<FriendRequest> friendRequests = <FriendRequest>[].obs;
   final RxList<String> friendRequestIds = <String>[].obs;
   final RxString highlightedUserId = ''.obs;
 
@@ -101,6 +102,20 @@ class ChatController extends GetxController {
         _logger.e('Error in user chats stream', error: error);
       },
     );
+  }
+  
+  Future<void> updateUserChats() async {
+    try {
+      if (currentUserId.value.isEmpty) return;
+      
+      // चैट सर्विस से नवीनतम चैट्स प्राप्त करें
+      final chats = await _chatService.fetchUserChats(currentUserId.value);
+      if (chats != null) {
+        userChats.value = chats;
+      }
+    } catch (e) {
+      _logger.e('Error updating user chats', error: e);
+    }
   }
 
 
@@ -193,6 +208,29 @@ class ChatController extends GetxController {
     }
   }
 
+  // चैट मैसेज को क्लियर करने के लिए मेथड
+  void clearChatMessages(String friendUserId) {
+    if (friendUserId.isEmpty) return;
+    
+    final chatId = _chatService.getChatId(currentUserId.value, friendUserId);
+    
+    // मैसेज लिस्ट से सभी मैसेज हटाएं
+    messages.clear();
+    messages.refresh();
+    
+    // होम स्क्रीन पर लास्ट मैसेज अपडेट करें
+    final index = userChats.indexWhere((chat) => 
+      chat.chatId == chatId || 
+      (chat.participants.contains(currentUserId.value) && 
+       chat.participants.contains(friendUserId))
+    );
+    
+    if (index != -1) {
+      userChats[index] = userChats[index].copyWith(lastMessage: 'No message yet');
+      userChats.refresh();
+    }
+  }
+
   Future<void> _updateTypingStatus(bool typing) async {
     if (peerId == null) return;
 
@@ -225,25 +263,6 @@ class ChatController extends GetxController {
     }
   }
 
-  // Future<Map<String, dynamic>?> getUserData(String userId) async {
-  //   if (userId.isEmpty) return null;
-  //
-  //   try {
-  //     final doc = await _firestore.collection('users').doc(userId).get();
-  //     if (doc.exists) {
-  //       return {...doc.data() as Map<String, dynamic>, 'uid': doc.id};
-  //     } else {
-  //       return null;
-  //     }
-  //   } on FirebaseException catch (e) {
-  //     _logger.e('Firebase error getting user data', error: e);
-  //     return null;
-  //   } catch (e) {
-  //     _logger.e('Unexpected error getting user data', error: e);
-  //     return null;
-  //   }
-  // }
-
   Future<void> _loadInitialData() async {
     if (currentUserId.value.isEmpty) return;
 
@@ -251,6 +270,7 @@ class ChatController extends GetxController {
       isLoading.value = true;
       await Future.wait([
         _loadUsers(),
+        loadFriends(),
         fetchFriendRequests(),
       ]);
     } catch (e) {
@@ -264,7 +284,7 @@ class ChatController extends GetxController {
   // Load all users (excluding current user)
   Future<void> _loadUsers() async {
     try {
-      final usersStream = _userService.getUsers(excludeUserId: currentUserId.value);
+      final usersStream = _userService.getFriendsStream(currentUserId.value);
       _subscriptions.add(
         usersStream.listen(
               (userList) => users.value = userList,
@@ -288,48 +308,168 @@ class ChatController extends GetxController {
     if (userId.isEmpty) return;
 
     try {
-      // 1️⃣ Get current user's friend request IDs
       final userDoc = await _firestore.collection('users').doc(userId).get();
-      if (!userDoc.exists) {
-        friendRequests.clear();
-        return;
-      }
-
-      final requestIds = List<String>.from(
-          (userDoc.data()?['friendRequests'] as List<dynamic>? ?? [])
-      );
+      final requestIds = List<String>.from(userDoc.data()?['friendRequests'] ?? []);
 
       if (requestIds.isEmpty) {
         friendRequests.clear();
         return;
       }
 
-      // 2️⃣ Fetch full UserModel for each request
       final requestsSnapshot = await _firestore
           .collection('friend_requests')
           .where(FieldPath.documentId, whereIn: requestIds)
           .get();
 
-      final loadedRequests = <UserModel>[];
+      final loadedRequests = <FriendRequest>[];
       for (final doc in requestsSnapshot.docs) {
         final senderId = doc.data()['senderId'] as String?;
+        final status = doc.data()['status'] as String? ?? 'pending';
         if (senderId != null) {
           final senderData = await _chatService.getUserData(senderId);
           if (senderData != null) {
-            loadedRequests.add(senderData);
+            loadedRequests.add(FriendRequest(
+              id: doc.id,
+              senderId: senderId,
+              sender: senderData,
+              status: status,
+            ));
           }
         }
       }
 
-      // 3️⃣ Assign to observable list
       friendRequests.value = loadedRequests;
-
-    } on FirebaseException catch (e) {
-      _logger.e('Firebase error fetching friend requests', error: e);
-      friendRequests.clear();
     } catch (e) {
-      _logger.e('Unexpected error fetching friend requests', error: e);
+      _logger.e('Error fetching friend requests', error: e);
       friendRequests.clear();
+    }
+  }
+
+
+  // Load current user's friends
+  Future<void> loadFriends() async {
+    try {
+      final userId = currentUserId.value;
+      if (userId.isEmpty) return;
+
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (!userDoc.exists) return;
+
+      final userData = userDoc.data() ?? {};
+      final friendIds = List<String>.from(
+        userData['friends'] as List<dynamic>? ?? [],
+      );
+
+      if (friendIds.isNotEmpty) {
+        final friendsSnapshot = await _firestore
+            .collection('users')
+            .where(FieldPath.documentId, whereIn: friendIds)
+            .get();
+
+        friends.value = friendsSnapshot.docs
+            .map((doc) => UserModel.fromMap({...doc.data(), 'uid': doc.id}))
+            .toList();
+      } else {
+        friends.clear();
+      }
+    } on FirebaseException catch (e) {
+      _logger.e('Firebase error loading friends', error: e);
+      common.showSnackbar('Error', 'Failed to load friends', Colors.red);
+    } catch (e) {
+      _logger.e('Unexpected error loading friends', error: e);
+      common.showSnackbar('Error', 'Failed to load friends', Colors.red);
+    }
+  }
+
+  // Accept friend request
+  Future<void> acceptFriendRequest(String requestId, String senderId) async {
+    try {
+      isLoading.value = true;
+      final batch = _firestore.batch();
+
+      // Update friend request status
+      final requestRef = _firestore.collection('friend_requests').doc(requestId);
+      batch.update(requestRef, {
+        'status': 'accepted',
+        'acceptedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Add to current user's friends
+      final currentUserRef = _firestore.collection('users').doc(currentUserId.value);
+      batch.update(currentUserRef, {
+        'friends': FieldValue.arrayUnion([senderId]),
+        'friendRequests': FieldValue.arrayRemove([requestId]),
+      });
+
+      // Add to sender's friends
+      final senderRef = _firestore.collection('users').doc(senderId);
+      batch.update(senderRef, {
+        'friends': FieldValue.arrayUnion([currentUserId.value]),
+      });
+
+      await batch.commit();
+
+      // Get the sender's user data
+      final senderDoc = await _firestore.collection('users').doc(senderId).get();
+      if (senderDoc.exists) {
+        final senderData = UserModel.fromMap({
+          ...senderDoc.data()!,
+          'uid': senderId,
+        });
+
+        // Update local state
+        friends.addIf(!friends.any((f) => f.uid == senderId), senderData);
+        friendRequests.removeWhere((r) => r.id == requestId);
+      }
+
+      // Refresh data from server
+      await Future.wait([loadFriends(), fetchFriendRequests()]);
+
+      common.showSnackbar('Success', 'Friend request accepted', Colors.green);
+    } on FirebaseException catch (e) {
+      _logger.e('Firebase error accepting friend request', error: e);
+      common.showSnackbar('Error', 'Failed to accept friend request', Colors.red);
+    } catch (e) {
+      _logger.e('Unexpected error accepting friend request', error: e);
+      common.showSnackbar('Error', 'An unexpected error occurred', Colors.red);
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  // Reject friend request
+  Future<void> rejectFriendRequest(String requestId) async {
+    try {
+      isLoading.value = true;
+      final batch = _firestore.batch();
+
+      // Update friend request status
+      final requestRef = _firestore.collection('friend_requests').doc(requestId);
+      batch.update(requestRef, {
+        'status': 'rejected',
+        'rejectedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Remove from current user's friend requests
+      final currentUserRef = _firestore.collection('users').doc(currentUserId.value);
+      batch.update(currentUserRef, {
+        'friendRequests': FieldValue.arrayRemove([requestId]),
+      });
+
+      await batch.commit();
+      
+      // Reload friend requests
+      await fetchFriendRequests();
+      
+      common.showSnackbar('Info', 'Friend request rejected', Colors.blue);
+    } on FirebaseException catch (e) {
+      _logger.e('Firebase error rejecting friend request', error: e);
+      common.showSnackbar('Error', 'Failed to reject friend request', Colors.red);
+    } catch (e) {
+      _logger.e('Unexpected error rejecting friend request', error: e);
+      common.showSnackbar('Error', 'An unexpected error occurred', Colors.red);
+    } finally {
+      isLoading.value = false;
     }
   }
 
@@ -448,6 +588,13 @@ class ChatController extends GetxController {
         senderName: currentUser.value?.name ?? 'Unknown',
         senderPhotoUrl: currentUser.value?.photoUrl,
       );
+      
+      if (messageModel != null) {
+        messages.add(messageModel);
+        messages.refresh();
+        
+        updateUserChats();
+      }
 
       _logger.i('Message sent successfully: ${messageModel.id}');
 

@@ -80,190 +80,128 @@ class AuthController extends GetxController {
     );
   }
 
-  Future<UserCredential?> signInWithEmailAndPassword({
-    required String email, 
-    required String password,
-  }) async {
-    if (email.isEmpty || password.isEmpty) {
-      errorMessage.value = 'Email and password are required';
-      return null;
-    }
-    
-    try {
-      _setLoading(true);
-      
-      final credential = await _auth.signInWithEmailAndPassword(
-        email: email.trim(),
-        password: password,
-      );
-      
-      return credential;
-    } catch (e) {
-      if (e is FirebaseAuthException) {
-        _handleAuthErrorNew(e);
-      } else {
-        errorMessage.value = 'An unexpected error occurred. Please try again.';
-      }
-      return null;
-    } finally {
-      _setLoading(false);
-    }
-  }
-  
-  /// Login method for the login button
-  void login() async {
-    if (email.value.isEmpty || password.value.isEmpty) {
-      errorMessage.value = 'Email and password are required';
-      return;
-    }
-    
-    try {
-      _setLoading(true);
-      
-      await signInWithEmailAndPassword(
-        email: email.value.trim(),
-        password: password.value,
-      );
-      
-    } catch (e) {
-      if (e is FirebaseAuthException) {
-        _handleAuthErrorNew(e);
-      } else {
-        errorMessage.value = 'An unexpected error occurred. Please try again.';
-      }
-    } finally {
-      _setLoading(false);
-    }
-  }
-  
+
   /// Sign in with Google
   Future<UserCredential?> googleSignIn() async {
     try {
-      _setLoading(true);
+      isLoading.value = true;
+      errorMessage.value = '';
 
+      // Step 1: Trigger the Google Sign-In flow
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return null;
+      if (googleUser == null) return null; // user cancelled
 
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      // Step 2: Get authentication details
+      final GoogleSignInAuthentication googleAuth =
+      await googleUser.authentication;
 
+      // Step 3: Create Firebase credential
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
+      // Step 4: Sign in with Firebase
       final userCredential = await _auth.signInWithCredential(credential);
-
-      // Convert Firebase User to your UserModel / PigeonUserDetails
       final firebaseUser = userCredential.user;
       if (firebaseUser == null) return null;
 
+      // Step 5: Convert to our UserModel
       final userModel = UserModel(
         uid: firebaseUser.uid,
         name: firebaseUser.displayName ?? 'User',
         email: firebaseUser.email ?? '',
         photoUrl: firebaseUser.photoURL,
+        bannerUrl: '',
         createdAt: DateTime.now(),
         lastSeen: DateTime.now(),
         isOnline: true,
       );
 
+      // Step 6: Save or update user in Firestore
+      final isNewUser = userCredential.additionalUserInfo?.isNewUser ?? false;
+
+      if (isNewUser) {
+        // New user → Save in Firestore
+        await _userService.saveUser(userModel);
+      } else {
+        // Existing user → Update profile info
+        await _userService.updateUser(firebaseUser.uid, {
+          'name': firebaseUser.displayName ?? 'User',
+          'email': firebaseUser.email ?? '',
+          'photoUrl': firebaseUser.photoURL,
+          'lastSeen': DateTime.now(),
+          'isOnline': true,
+        });
+      }
+
+      // Step 7: Update local state
       _currentUser.value = userModel;
       isLoggedIn.value = true;
 
-      // Save user in Firestore if needed
-      await _userService.saveUser(userModel);
-
       return userCredential;
-
     } catch (e) {
       errorMessage.value = 'Failed to sign in with Google: ${e.toString()}';
       return null;
     } finally {
-      _setLoading(false);
+      isLoading.value = false;
     }
-  }
-  
-  void _handleAuthError(dynamic error) {
-    if (error is FirebaseAuthException) {
-      switch (error.code) {
-        case 'user-not-found':
-          errorMessage.value = 'No user found with this email';
-          break;
-        case 'wrong-password':
-          errorMessage.value = 'Wrong password';
-          break;
-        case 'invalid-email':
-          errorMessage.value = 'Invalid email format';
-          break;
-        case 'user-disabled':
-          errorMessage.value = 'This account has been disabled';
-          break;
-        default:
-          errorMessage.value = 'Authentication failed: ${error.message}';
-      }
-    } else {
-      errorMessage.value = 'Authentication failed: $error';
-    }
-    _logger.e('Authentication error', error: error);
   }
 
+
   Future<UserCredential?> _signInWithEmailAndPassword({
-    required String email, 
+    required String email,
     required String password,
   }) async {
     if (email.isEmpty || password.isEmpty) {
       errorMessage.value = 'Email and password are required';
       return null;
     }
-    
+
     try {
       _setLoading(true);
-      
+
       final credential = await _auth.signInWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
-      
-      if (credential.user != null) {
-        _logger.i('User signed in: ${credential.user!.uid}');
-        
-        // Check if email is verified if required
-        if (!credential.user!.emailVerified) {
-          _logger.w('Email not verified for user: ${credential.user!.uid}');
-          // Optionally: Send verification email
-          await _sendVerificationEmail();
-        }
+
+      if (credential.user != null && !credential.user!.emailVerified) {
+        await _sendVerificationEmail();
       }
-      
+
       return credential;
-      
     } on FirebaseAuthException catch (e) {
       _handleAuthErrorNew(e);
       return null;
-    } catch (e, stackTrace) {
-      _logger.e('Unexpected error during sign in', 
-        error: e, 
-        stackTrace: stackTrace,
-      );
+    } catch (e) {
       errorMessage.value = 'An unexpected error occurred. Please try again.';
       return null;
     } finally {
       _setLoading(false);
     }
   }
-  
+
+  /// Public method for login button
+  Future<void> login() async {
+    await _signInWithEmailAndPassword(
+      email: email.value.trim(),
+      password: password.value,
+    );
+  }
+
   /// Sends a verification email to the current user
   Future<bool> _sendVerificationEmail() async {
     final user = _auth.currentUser;
     if (user == null) return false;
-    
+
     try {
       await user.sendEmailVerification();
       _logger.i('Verification email sent to ${user.email}');
       return true;
     } catch (e, stackTrace) {
-      _logger.e('Error sending verification email', 
-        error: e, 
+      _logger.e('Error sending verification email',
+        error: e,
         stackTrace: stackTrace,
       );
       return false;
@@ -314,105 +252,6 @@ class AuthController extends GetxController {
       isLoading.value = false;
     }
   }
-
-  // Sign in with Google
-  Future<UserCredential?> signInWithGoogle() async {
-    try {
-      isLoading.value = true;
-      errorMessage.value = '';
-      
-      // Trigger the authentication flow
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
-        // User cancelled the sign-in
-        return null;
-      }
-      
-      // Obtain the auth details from the request
-      final GoogleSignInAuthentication googleAuth = 
-          await googleUser.authentication;
-      
-      // Create a new credential
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-      
-      // Once signed in, return the UserCredential
-      final userCredential = await _auth.signInWithCredential(credential);
-      
-      // Check if user is new or existing
-      if (userCredential.additionalUserInfo?.isNewUser == true) {
-        // Create user in Firestore
-        final user = UserModel(
-          uid: userCredential.user!.uid,
-          name: userCredential.user!.displayName ?? 'User',
-          email: userCredential.user!.email ?? '',
-          photoUrl: userCredential.user!.photoURL,
-          createdAt: DateTime.now(),
-          lastSeen: DateTime.now(),
-          isOnline: true,
-        );
-        
-        await _userService.saveUser(user);
-      }
-      
-      return userCredential;
-    } catch (e) {
-      errorMessage.value = 'Failed to sign in with Google: ${e.toString()}';
-      return null;
-    } finally {
-      isLoading.value = false;
-    }
-  }
-  
-  Future<void> signOut() async {
-    try {
-      isLoading.value = true;
-      errorMessage.value = '';
-      
-      // Update user's online status
-      if (_auth.currentUser != null) {
-        await _userService.updateUserPresence(_auth.currentUser!.uid, false);
-      }
-      
-      // Sign out from Google if signed in with Google
-      if (await _googleSignIn.isSignedIn()) {
-        await _googleSignIn.signOut();
-      }
-      
-      // Sign out from Firebase
-      await _auth.signOut();
-      
-      // Clear current user
-      _currentUser.value = null;
-      isLoggedIn.value = false;
-    } catch (e) {
-      errorMessage.value = 'Failed to sign out: ${e.toString()}';
-      rethrow;
-    } finally {
-      isLoading.value = false;
-    }
-  }
-  
-  // This method has been replaced by the implementation at line ~600
-  
-  // This method has been replaced by the implementation at line ~600
-  // Keeping the method signature for reference
-  Future<void> _updateProfileOld({
-    String? displayName,
-    String? photoURL,
-  }) async {
-    // Implementation removed to avoid duplication
-    return;
-  }
-  
-  // This method has been replaced by the implementation at line ~650
-  Future<bool> _deleteAccountOld() async {
-    // Implementation removed to avoid duplication
-    return false;
-  }
-  
   // Handle signed in user
   Future<void> _handleSignedInUser(User user) async {
     try {
@@ -498,103 +337,7 @@ class AuthController extends GetxController {
     }
   }
   
-  /// Updates the current user's profile
-  Future<bool> updateProfile({
-    String? displayName,
-    String? photoURL,
-  }) async {
-    final user = _auth.currentUser;
-    if (user == null) {
-      errorMessage.value = 'No user is currently signed in';
-      return false;
-    }
-    
-    try {
-      _setLoading(true);
-      
-      // Update Firebase Auth profile
-      await user.updateDisplayName(displayName);
-      if (photoURL != null) {
-        await user.updatePhotoURL(photoURL);
-      }
-      
-      // Update Firestore user document
-      final currentUser = _currentUser.value;
-      if (currentUser != null) {
-        final updatedUser = UserModel(
-          uid: currentUser.uid,
-          name: displayName ?? currentUser.name,
-          email: currentUser.email,
-          photoUrl: photoURL ?? currentUser.photoUrl,
-          isOnline: currentUser.isOnline,
-          lastSeen: currentUser.lastSeen,
-          createdAt: currentUser.createdAt,
-          bio: currentUser.bio,
-          status: currentUser.status,
-          bannerUrl: currentUser.bannerUrl,
-          friends: currentUser.friends,
-          friendRequests: currentUser.friendRequests,
-          settings: currentUser.settings,
-          updatedAt: DateTime.now(),
-        );
-        
-        await _userService.saveUser(updatedUser);
-        _currentUser.value = updatedUser;
-      }
-      
-      _logger.i('Profile updated successfully');
-      return true;
-      
-    } on FirebaseAuthException catch (e) {
-      _handleAuthErrorNew(e);
-      return false;
-    } catch (e, stackTrace) {
-      _logger.e('Error updating profile', 
-        error: e, 
-        stackTrace: stackTrace,
-      );
-      errorMessage.value = 'An error occurred while updating your profile.';
-      return false;
-    } finally {
-      _setLoading(false);
-    }
-  }
-  Future<void> logout() async {
-    try {
-      isLoading.value = true;
-      errorMessage.value = '';
 
-      final user = _auth.currentUser;
-
-      // Update Firestore presence
-      if (user != null) {
-        await _userService.updateUserPresence(user.uid, false);
-      }
-
-      // Sign out from Google if signed in
-      if (await _googleSignIn.isSignedIn()) {
-        await _googleSignIn.signOut();
-      }
-
-      // Sign out from Firebase
-      await _auth.signOut();
-
-      // Clear local state
-      _currentUser.value = null;
-      isLoggedIn.value = false;
-      isEmailVerified.value = false;
-
-      _logger.i('User successfully logged out');
-    } catch (e) {
-      errorMessage.value = 'Failed to logout: ${e.toString()}';
-      _logger.e('Logout error', error: e);
-    } finally {
-      isLoading.value = false;
-    }
-  }
-  /// Deletes the current user's account
-  /// 
-  /// Requires recent login for security reasons
   Future<bool> deleteAccount() async {
     final user = _auth.currentUser;
     if (user == null) {

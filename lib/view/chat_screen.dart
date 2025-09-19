@@ -1,6 +1,8 @@
 import 'dart:ui';
 import 'package:ads_demo/constant/common.dart';
 import 'package:ads_demo/services/chat_services.dart';
+import 'package:ads_demo/services/user_service.dart';
+import 'package:ads_demo/view/home_page.dart';
 import 'package:ads_demo/widgets/glass.dart';
 import 'package:animated_background/animated_background.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -30,6 +32,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   final ScrollController _scrollController = ScrollController();
   final ChatService _chatService = ChatService();
   final FocusNode _focusNode = FocusNode();
+  final UserService userService = UserService();
 
   bool _isEmojiVisible = false;
   bool _isLoading = true;
@@ -42,7 +45,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   late Animation<Offset> _slideAnimation;
 
   // General Variables
-  int _behaviourIndex = 0;
   Behaviour? _behaviour;
 
   @override
@@ -169,8 +171,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
   }
 
-
-
   Widget _buildMessageList() {
     return StreamBuilder<List<MessageModel>>(
       stream: _chatService.getMessages(
@@ -296,9 +296,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         }
 
         return ListView.builder(
-          reverse: true,
           controller: _scrollController,
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+          reverse: true,
           itemCount: messages.length,
           itemBuilder: (context, index) {
             final message = messages[index];
@@ -426,44 +426,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               size: 22,
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAttachmentOption({
-    required IconData icon,
-    required String label,
-    required List<Color> gradient,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 50,
-              height: 50,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(colors: gradient),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: Colors.white, size: 24),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: GoogleFonts.poppins(
-                color: Colors.white.withOpacity(0.8),
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -658,16 +620,42 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   ),
                   color: Colors.transparent,
                   elevation: 0,
-                  onSelected: (value) {
+                  onSelected: (value) async {
                     switch (value) {
                       case 'mute':
                         // TODO: Implement mute notifications
                         break;
                       case 'clear_chat':
-                        // TODO: Implement clear chat
+                        final success = await _chatService.softDeleteChatForUser(
+                          currentUserId: _chatController.currentUserId.value,
+                          friendUserId: widget.peerUser?.uid ?? '',
+                        );
+                        if (success) {
+                          _chatController.clearChatMessages(widget.peerUser?.uid ?? '');
+                          _chatController.updateUserChats();
+                        }
                         break;
                       case 'delete':
-                        // TODO: Implement block user
+                        final success = await userService.removeFriend(
+                          currentUserId: _chatController.currentUserId.value,
+                          friendUserId: widget.peerUser?.uid ?? '',
+                        );
+
+                        if (success) {
+                          Common().showSnackbar(
+                            'Success',
+                            'Delete User',
+                            Colors.green,
+                          );
+                          Get.to(()=> HomePage());
+                        } else {
+                          Get.snackbar(
+                            'Error',
+                            'Failed to remove friend',
+                            backgroundColor: Colors.red.withOpacity(0.8),
+                            colorText: Colors.white,
+                          );
+                        }
                         break;
                     }
                   },
@@ -683,7 +671,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                       'Clear Chat',
                     ),
                     _buildPopupMenuItem(
-                      'block',
+                      'delete',
                       Icons.block_rounded,
                       'Delete User',
                     ),
@@ -709,12 +697,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             children: [
               // Messages list
               Expanded(
-                child: Padding(
-                  padding: EdgeInsets.only(top: MediaQuery.of(context).size.height * 0.1),
-                  child: _buildMessageList(),
-                ),
+                child: _buildMessageList(),
               ),
-
 
               // Emoji picker
               AnimatedContainer(
