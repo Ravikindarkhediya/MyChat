@@ -1,0 +1,497 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class ChatFirebaseManager {
+  static final ChatFirebaseManager _instance = ChatFirebaseManager._internal();
+  factory ChatFirebaseManager() => _instance;
+  ChatFirebaseManager._internal();
+
+  final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+  FlutterLocalNotificationsPlugin();
+
+  String? _currentUserId;
+  String? _currentUserName;
+
+  // ================================
+  // ✅ CHAT-SPECIFIC INITIALIZATION
+  // ================================
+
+  Future<void> initChatNotifications({
+    required String userId,
+    required String userName,
+  }) async {
+    _currentUserId = userId;
+    _currentUserName = userName;
+
+    NotificationSettings notificationSettings =
+    await FirebaseMessaging.instance.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+      announcement: false,
+      criticalAlert: true,
+      carPlay: false,
+      provisional: false,
+    );
+
+    if (notificationSettings.authorizationStatus == AuthorizationStatus.authorized) {
+      print('✅ User granted notification permission');
+
+      // ✅ Remove topic subscriptions - not needed for chat
+      // Instead, save user-specific FCM token to Firestore
+      await _saveFCMTokenToFirestore();
+
+      // ✅ Initialize local notifications with chat-specific settings
+      await _initializeLocalNotifications();
+
+      // ✅ Set up chat-specific message handlers
+      _setChatMessageHandlers();
+
+      print('✅ Chat notifications initialized for user: $userId');
+    } else {
+      print('❌ User declined notification permission');
+    }
+  }
+
+  Future<void> _initializeLocalNotifications() async {
+    // ✅ Chat-specific Android settings
+    const AndroidInitializationSettings initializationSettingsAndroid =
+    AndroidInitializationSettings('@drawable/ic_stat_mind_zora');
+
+    const DarwinInitializationSettings initializationSettingsIOS =
+    DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
+
+    final InitializationSettings initializationSettings = InitializationSettings(
+      android: initializationSettingsAndroid,
+      iOS: initializationSettingsIOS,
+    );
+
+    await flutterLocalNotificationsPlugin.initialize(
+      initializationSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        if (response.payload != null) {
+          print("💬 Chat notification payload: ${response.payload}");
+          _handleChatNotificationClick(response.payload!);
+        }
+      },
+    );
+
+    // ✅ Create chat-specific notification channel
+    await _createChatNotificationChannel();
+  }
+
+  Future<void> _createChatNotificationChannel() async {
+    const AndroidNotificationChannel channel = AndroidNotificationChannel(
+      'chat_messages', // Channel ID
+      'Chat Messages', // Channel name
+      description: 'Notifications for new chat messages',
+      importance: Importance.high,
+      playSound: true,
+      enableVibration: true,
+      enableLights: true,
+      showBadge: true,
+    );
+
+    await flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(channel);
+
+    print('✅ Chat notification channel created');
+  }
+
+  // ================================
+  // ✅ FCM TOKEN MANAGEMENT FOR CHAT
+  // ================================
+
+  Future<void> _saveFCMTokenToFirestore() async {
+    try {
+      final String? fcmToken = await _firebaseMessaging.getToken();
+      if (fcmToken == null) {
+        print('❌ Failed to get FCM token');
+        return;
+      }
+
+      print("📱 FCM TOKEN: $fcmToken");
+
+      // ✅ Save token to Firestore instead of API
+      await _db.collection('users').doc(_currentUserId).set({
+        'fcmToken': fcmToken,
+        'deviceType': Platform.isIOS ? 'ios' : 'android',
+        'lastTokenUpdate': FieldValue.serverTimestamp(),
+        'isOnline': true,
+        'lastActive': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      print('✅ FCM token saved to Firestore');
+
+      // ✅ Listen for token refresh
+      _firebaseMessaging.onTokenRefresh.listen((newToken) {
+        _updateTokenInFirestore(newToken);
+      });
+
+    } catch (e) {
+      print('❌ Error saving FCM token: $e');
+    }
+  }
+
+  Future<void> _updateTokenInFirestore(String newToken) async {
+    try {
+      await _db.collection('users').doc(_currentUserId).update({
+        'fcmToken': newToken,
+        'lastTokenUpdate': FieldValue.serverTimestamp(),
+      });
+      print('✅ FCM token updated in Firestore');
+    } catch (e) {
+      print('❌ Error updating FCM token: $e');
+    }
+  }
+
+  // ================================
+  // ✅ CHAT-SPECIFIC MESSAGE HANDLERS
+  // ================================
+
+  void _setChatMessageHandlers() {
+    // ✅ Foreground message handler for chat
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
+      print('📥 Foreground chat message: ${message.notification?.title}');
+
+      // ✅ Check if user is in the same chat
+      final String? chatId = message.data['chatId'];
+      final String? activeChatId = await _getActiveChatId();
+
+      if (chatId != null && chatId != activeChatId) {
+        await _showChatNotification(message);
+      } else {
+        print('🔇 User is in same chat, skipping notification');
+      }
+    });
+
+    // ✅ Background message handler
+    FirebaseMessaging.onBackgroundMessage(_chatBackgroundMessageHandler);
+
+    // ✅ App opened from notification
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      print('📱 App opened from notification');
+      _handleChatNotificationClick(jsonEncode(message.data));
+    });
+
+    // ✅ Initial message when app starts from notification
+    FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
+      if (message != null) {
+        print('🚀 App started from notification');
+        _handleChatNotificationClick(jsonEncode(message.data));
+      }
+    });
+  }
+
+  // ================================
+  // ✅ CHAT NOTIFICATION DISPLAY
+  // ================================
+
+  Future<void> _showChatNotification(RemoteMessage message) async {
+    final String senderName = message.data['senderName'] ?? 'Unknown User';
+    final String messageText = message.data['message'] ?? message.notification?.body ?? '';
+    final String messageType = message.data['messageType'] ?? 'text';
+
+    // ✅ Format notification body based on message type
+    String notificationBody = _formatChatNotificationBody(messageText, messageType);
+
+    // ✅ Chat-specific Android notification settings
+    AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'chat_messages', // Use the channel we created
+      'Chat Messages',
+      importance: Importance.high,
+      priority: Priority.high,
+      ticker: '$senderName sent a message',
+      icon: '@drawable/ic_stat_mind_zora',
+      largeIcon: DrawableResourceAndroidBitmap('@drawable/ic_chat_avatar'),
+      enableVibration: true,
+      enableLights: true,
+      playSound: true,
+      autoCancel: true,
+      category: AndroidNotificationCategory.message,
+      styleInformation: BigTextStyleInformation(
+        notificationBody,
+        contentTitle: senderName,
+      ),
+    );
+
+    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+      interruptionLevel: InterruptionLevel.active,
+    );
+
+    final NotificationDetails platformDetails = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+
+    // ✅ Use timestamp as notification ID to avoid duplicates
+    final int notificationId = DateTime.now().millisecondsSinceEpoch.remainder(100000);
+
+    await flutterLocalNotificationsPlugin.show(
+      notificationId,
+      senderName,
+      notificationBody,
+      platformDetails,
+      payload: jsonEncode(message.data),
+    );
+
+    print('🔔 Chat notification shown: $senderName - $notificationBody');
+  }
+
+  // ✅ Format notification body based on message type
+  String _formatChatNotificationBody(String message, String messageType) {
+    switch (messageType) {
+      case 'image':
+        return '📷 Sent an image';
+      case 'video':
+        return '🎥 Sent a video';
+      case 'audio':
+        return '🎵 Sent an audio message';
+      case 'document':
+        return '📄 Sent a document';
+      case 'location':
+        return '📍 Shared location';
+      default:
+        return message.length > 100 ? '${message.substring(0, 100)}...' : message;
+    }
+  }
+
+  // ================================
+  // ✅ CHAT NOTIFICATION CLICK HANDLING
+  // ================================
+
+  void _handleChatNotificationClick(String payload) {
+    try {
+      if (payload.isEmpty) return;
+
+      final Map<String, dynamic> data = jsonDecode(payload);
+      final String? chatId = data['chatId'];
+      final String? senderId = data['senderId'];
+      final String? senderName = data['senderName'];
+
+      print('💬 Opening chat: $chatId from user: $senderName');
+
+      if (chatId != null) {
+        // ✅ Navigate to chat screen using GetX
+        Get.toNamed('/chat', arguments: {
+          'chatId': chatId,
+          'otherUserId': senderId,
+          'otherUserName': senderName,
+        });
+
+        // ✅ Mark messages as read
+        _markChatMessagesAsRead(chatId);
+
+        // ✅ Set as active chat
+        _setActiveChatId(chatId);
+      }
+    } catch (e) {
+      print('❌ Error handling chat notification click: $e');
+    }
+  }
+
+  // ================================
+  // ✅ SENDING CHAT NOTIFICATIONS
+  // ================================
+
+  Future<void> sendChatNotification({
+    required String receiverId,
+    required String chatId,
+    required String message,
+    String? messageType,
+    String? senderName,
+  }) async {
+    try {
+      // ✅ Get receiver's FCM token from Firestore
+      final userDoc = await _db.collection('users').doc(receiverId).get();
+
+      if (!userDoc.exists) {
+        print('❌ Receiver not found: $receiverId');
+        return;
+      }
+
+      final userData = userDoc.data()!;
+      final String? fcmToken = userData['fcmToken'];
+      final bool isOnline = userData['isOnline'] ?? false;
+      final String? activeChat = userData['activeChatId'];
+
+      if (fcmToken == null || fcmToken.isEmpty) {
+        print('❌ No FCM token for receiver: $receiverId');
+        return;
+      }
+
+      // ✅ Don't send if user is online and viewing same chat
+      if (isOnline && activeChat == chatId) {
+        print('🔇 User is viewing this chat, skipping notification');
+        return;
+      }
+
+      // ✅ Use HTTP v1 API or store for Cloud Function processing
+      // For now, store in Firestore for Cloud Function to process
+      await _db.collection('pending_notifications').add({
+        'receiverId': receiverId,
+        'senderId': _currentUserId,
+        'senderName': senderName ?? _currentUserName ?? 'Unknown User',
+        'chatId': chatId,
+        'message': message,
+        'messageType': messageType ?? 'text',
+        'fcmToken': fcmToken,
+        'timestamp': FieldValue.serverTimestamp(),
+        'processed': false,
+      });
+
+      print('✅ Chat notification queued for processing');
+
+    } catch (e) {
+      print('❌ Error sending chat notification: $e');
+    }
+  }
+
+  // ================================
+  // ✅ UTILITY METHODS
+  // ================================
+
+  Future<String?> _getActiveChatId() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('active_chat_id');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<void> _setActiveChatId(String chatId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('active_chat_id', chatId);
+
+      // ✅ Also update in Firestore
+      await _db.collection('users').doc(_currentUserId).update({
+        'activeChatId': chatId,
+      });
+    } catch (e) {
+      print('❌ Error setting active chat: $e');
+    }
+  }
+
+  Future<void> _markChatMessagesAsRead(String chatId) async {
+    try {
+      // ✅ Update unread count
+      await _db.collection('chats').doc(chatId).update({
+        'unreadCount.$_currentUserId': 0,
+      });
+
+      // ✅ Mark individual messages as read
+      final messagesQuery = await _db
+          .collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .where('receiverId', isEqualTo: _currentUserId)
+          .where('read', isEqualTo: false)
+          .get();
+
+      final batch = _db.batch();
+      for (final doc in messagesQuery.docs) {
+        batch.update(doc.reference, {'read': true});
+      }
+      await batch.commit();
+
+      print('✅ Messages marked as read in chat: $chatId');
+    } catch (e) {
+      print('❌ Error marking messages as read: $e');
+    }
+  }
+
+  Future<void> updateUserOnlineStatus(bool isOnline) async {
+    try {
+      if (_currentUserId == null) return;
+
+      await _db.collection('users').doc(_currentUserId).update({
+        'isOnline': isOnline,
+        'lastSeen': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('❌ Error updating online status: $e');
+    }
+  }
+
+  Future<void> clearActiveChatId() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('active_chat_id');
+
+      await _db.collection('users').doc(_currentUserId).update({
+        'activeChatId': FieldValue.delete(),
+      });
+    } catch (e) {
+      print('❌ Error clearing active chat: $e');
+    }
+  }
+
+  // ================================
+  // ✅ CLEANUP METHODS
+  // ================================
+
+  Future<void> deleteFCMToken() async {
+    try {
+      await _firebaseMessaging.deleteToken();
+
+      // ✅ Also remove from Firestore
+      if (_currentUserId != null) {
+        await _db.collection('users').doc(_currentUserId).update({
+          'fcmToken': FieldValue.delete(),
+          'isOnline': false,
+        });
+      }
+
+      print('✅ FCM token deleted successfully');
+    } catch (e) {
+      print('❌ Failed to delete FCM token: $e');
+    }
+  }
+
+  Future<void> signOut() async {
+    try {
+      await updateUserOnlineStatus(false);
+      await clearActiveChatId();
+      await deleteFCMToken();
+
+      _currentUserId = null;
+      _currentUserName = null;
+
+      print('✅ User signed out successfully');
+    } catch (e) {
+      print('❌ Error during sign out: $e');
+    }
+  }
+}
+
+// ================================
+// ✅ BACKGROUND MESSAGE HANDLER
+// ================================
+
+@pragma('vm:entry-point')
+Future<void> _chatBackgroundMessageHandler(RemoteMessage message) async {
+  print('📩 Background chat message: ${message.notification?.title}');
+
+  await Firebase.initializeApp();
+
+  // ✅ Handle background notification logic here
+  print('Background message data: ${message.data}');
+}

@@ -13,6 +13,7 @@ import '../constant/common.dart';
 import '../models/friend_request_model.dart';
 import '../models/message_model.dart';
 import '../models/user_model.dart';
+import '../services/chat_firebase_manager.dart';
 import '../services/chat_services.dart';
 import '../services/user_service.dart';
 
@@ -591,12 +592,24 @@ class ChatController extends GetxController {
         senderName: currentUser.value?.name ?? 'Unknown',
         senderPhotoUrl: currentUser.value?.photoUrl,
       );
-      
+
       if (messageModel != null) {
         messages.add(messageModel);
         messages.refresh();
-        
         updateUserChats();
+      }
+
+      // Enqueue push notification for the receiver via Firestore (processed by Cloud Function)
+      try {
+        final chatId = _chatService.getChatId(currentUserId.value, receiverId);
+        await ChatFirebaseManager().sendChatNotification(
+          receiverId: receiverId,
+          chatId: chatId,
+          message: message.trim(),
+          senderName: currentUser.value?.name,
+        );
+      } catch (e) {
+        _logger.w('Failed to enqueue notification: $e');
       }
 
       _logger.i('Message sent successfully: ${messageModel.id}');

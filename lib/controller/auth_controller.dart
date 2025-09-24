@@ -6,6 +6,7 @@ import 'package:logger/logger.dart';
 // import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import '../models/user_model.dart';
+import '../services/notification_service.dart';
 import '../services/user_service.dart';
 
 /// Controller for handling authentication state and user management
@@ -138,6 +139,7 @@ class AuthController extends GetxController {
       // Step 7: Update local state
       _currentUser.value = userModel;
       isLoggedIn.value = true;
+      await _initializeNotificationsForUser();
 
       return userCredential;
     } catch (e) {
@@ -147,6 +149,27 @@ class AuthController extends GetxController {
       isLoading.value = false;
     }
   }
+
+  Future<void> _initializeNotificationsForUser() async {
+    try {
+      // Check if user data is available
+      if (currentUser == null) {
+        _logger.w('Cannot initialize notifications: User data not available');
+        return;
+      }
+
+      await FirebaseNotificationService().initializeForUser(
+        userId: currentUser!.uid,
+        userName: currentUser!.name,
+      );
+
+      _logger.i('✅ Notifications initialized for user: ${currentUser!.uid}');
+    } catch (e) {
+      _logger.e('❌ Failed to initialize notifications: $e');
+      // Don't block the login process if notifications fail
+    }
+  }
+
 
 
   Future<UserCredential?> _signInWithEmailAndPassword({
