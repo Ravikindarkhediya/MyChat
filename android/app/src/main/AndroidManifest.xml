@@ -21,6 +21,11 @@
         android:icon="@mipmap/ic_launcher"
         tools:replace="android:label">
 
+        <!-- Default channel for Firebase Messaging notifications -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="chat_messages" />
+
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-3342282178653412~9812524100"/>

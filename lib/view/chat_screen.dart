@@ -1,7 +1,7 @@
 import 'dart:ui';
 import 'package:ads_demo/constant/common.dart';
 import 'package:ads_demo/services/calling_service.dart';
-import 'package:ads_demo/services/chat_services.dart';
+import 'package:ads_demo/services/chat_services/chat_services.dart';
 import 'package:ads_demo/services/user_service.dart';
 import 'package:animated_background/animated_background.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +13,7 @@ import '../models/message_model.dart';
 import '../models/user_model.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/glass.dart';
+import '../widgets/message_input_widget.dart';
 import 'home_page.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -156,46 +157,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
   }
 
-  // Widget _buildGlassContainer({
-  //   required Widget child,
-  //   double? width,
-  //   double? height,
-  //   EdgeInsetsGeometry? margin,
-  //   EdgeInsetsGeometry? padding,
-  //   double borderRadius = 16,
-  //   double opacity = 0.15,
-  // }) {
-  //   return Container(
-  //     width: width,
-  //     height: height,
-  //     margin: margin,
-  //     child: ClipRRect(
-  //       borderRadius: BorderRadius.circular(borderRadius),
-  //       child: BackdropFilter(
-  //         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-  //         child: Container(
-  //           padding: padding,
-  //           decoration: BoxDecoration(
-  //             gradient: LinearGradient(
-  //               begin: Alignment.topLeft,
-  //               end: Alignment.bottomRight,
-  //               colors: [
-  //                 Colors.white.withOpacity(opacity),
-  //                 Colors.white.withOpacity(opacity * 0.5),
-  //               ],
-  //             ),
-  //             borderRadius: BorderRadius.circular(borderRadius),
-  //             border: Border.all(
-  //               color: Colors.white.withOpacity(0.2),
-  //               width: 1.5,
-  //             ),
-  //           ),
-  //           child: child,
-  //         ),
-  //       ),
-  //     ),
-  //   );
-  // }
+
 
   Widget _buildMessageList() {
     return StreamBuilder<List<MessageModel>>(
@@ -336,6 +298,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               duration: Duration(milliseconds: 300 + (index * 50)),
               child: ChatBubble(
                 message: message,
+                chatController: _chatController,
                 isMe: isMe,
                 showTime:
                     index == 0 ||
@@ -356,152 +319,21 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildMessageInput() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-      child: GlassContainer(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        borderRadius: 25,
-        opacity: 0.2,
-        child: Row(
-          children: [
-            // Emoji button
-            _buildActionButton(
-              icon: Icons.emoji_emotions_outlined,
-              onPressed: () {
-                _focusNode.unfocus();
-                setState(() => _isEmojiVisible = !_isEmojiVisible);
-              },
-            ),
-
-            // Text input field
-            Expanded(
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 8),
-                child: TextField(
-                  controller: _messageController,
-                  focusNode: _focusNode,
-                  style: GoogleFonts.poppins(color: Colors.white, fontSize: 15),
-                  decoration: InputDecoration(
-                    fillColor: Colors.transparent,
-                    hintStyle: GoogleFonts.poppins(
-                      color: Colors.white.withOpacity(0.5),
-                      fontSize: 15,
-                    ),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 12,
-                    ),
-                  ),
-                  maxLines: 4,
-                  minLines: 1,
-                  onSubmitted: (_) => _sendMessage(),
-                ),
-              ),
-            ),
-
-            // Camera button
-            _buildActionButton(
-              icon: Icons.camera_alt_rounded,
-              onPressed: () {
-                print(_peerUser!.uid);
-                _chatController.uploadSmallImage(_peerUser!.uid);
-              },
-            ),
-
-            // Send/Voice button
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              child: _buildActionButton(
-                icon: _isTyping ? Icons.send_rounded : Icons.mic_rounded,
-                onPressed: _isTyping
-                    ? _sendMessage
-                    : () {
-                        // TODO: Implement voice message
-                      },
-                isHighlighted: _isTyping,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required VoidCallback onPressed,
-    bool isHighlighted = false,
-  }) {
-    return Container(
-      margin: const EdgeInsets.all(4),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: onPressed,
-          child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: isHighlighted
-                  ? LinearGradient(
-                      colors: [
-                        Colors.blue.withOpacity(0.6),
-                        Colors.purple.withOpacity(0.6),
-                      ],
-                    )
-                  : null,
-            ),
-            child: Icon(
-              icon,
-              color: isHighlighted
-                  ? Colors.white
-                  : Colors.white.withOpacity(0.7),
-              size: 22,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAttachmentOption({
-    required IconData icon,
-    required String label,
-    required List<Color> gradient,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 50,
-              height: 50,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(colors: gradient),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: Colors.white, size: 24),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: GoogleFonts.poppins(
-                color: Colors.white.withOpacity(0.8),
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return MessageInputWidget(
+      onSendTextMessage: (message) {
+        _chatController.sendMessageToUser(_peerUser!.uid, message);
+      },
+      onSendVoiceMessage: (audioPath, duration) {
+        _chatController.sendVoiceMessage(
+          _peerUser!.uid,
+          audioPath,
+          duration,
+        );
+      },
+      onCameraPressed: () {
+        print(_peerUser!.uid);
+        _chatController.uploadSmallImage(_peerUser!.uid);
+      },
     );
   }
 
@@ -912,4 +744,5 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       ),
     );
   }
+
 }

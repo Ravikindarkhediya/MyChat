@@ -3,7 +3,7 @@ import 'dart:ui';
 import 'package:ads_demo/constant/common.dart';
 import 'package:ads_demo/controller/home_controller.dart';
 import 'package:ads_demo/controller/profile_controller.dart';
-import 'package:ads_demo/services/chat_services.dart';
+import 'package:ads_demo/services/chat_services/chat_services.dart';
 import 'package:ads_demo/widgets/glass.dart';
 import 'package:animated_background/animated_background.dart';
 import 'package:flutter/material.dart';

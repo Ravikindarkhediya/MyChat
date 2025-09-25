@@ -10,11 +10,13 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:logger/logger.dart';
 import '../constant/common.dart';
+import '../models/enums.dart';
 import '../models/friend_request_model.dart';
 import '../models/message_model.dart';
 import '../models/user_model.dart';
-import '../services/chat_firebase_manager.dart';
-import '../services/chat_services.dart';
+import '../services/chat_services/chat_firebase_manager.dart';
+import '../services/chat_services/chat_services.dart';
+import '../services/chat_services/voice_recording_service.dart';
 import '../services/user_service.dart';
 
 class ChatController extends GetxController {
@@ -34,6 +36,7 @@ class ChatController extends GetxController {
   // Disposers
   final List<StreamSubscription> _subscriptions = [];
   StreamSubscription? _userChatsSubscription;
+  final VoiceRecordingService _voiceService = VoiceRecordingService();
 
   // Observables
   final RxList<MessageModel> messages = <MessageModel>[].obs;
@@ -565,31 +568,64 @@ class ChatController extends GetxController {
     } catch (e) {
       _logger.e('Unexpected error sending friend request', error: e);
       common.showSnackbar('Error', 'An unexpected error occurred', Colors.red);
-    } finally {
-      isLoading.value = false;
+      return;
     }
   }
 
   Future<void> sendMessageToUser(String receiverId, String message) async {
-    if (receiverId.isEmpty || message.trim().isEmpty) {
+    // Validate inputs
+    final trimmed = message.trim();
+    if (receiverId.isEmpty || trimmed.isEmpty) {
       common.showSnackbar('Error', 'Invalid message data', Colors.red);
+      _logger.w('✋ Aborting send: receiverId or message empty');
       return;
     }
 
     if (currentUserId.value.isEmpty) {
       common.showSnackbar('Error', 'User not authenticated', Colors.red);
+      _logger.w('✋ Aborting send: currentUserId is empty');
       return;
     }
+
+    final senderId = currentUserId.value;
+    final senderName = currentUser.value?.name ?? 'Unknown';
+    final chatId = _chatService.getChatId(senderId, receiverId);
 
     try {
       isSendingMessage.value = true;
 
+      // Pre-flight logging for debugging notification pipeline
+      _logger.i('🧭 Preparing to send message');
+      _logger.i('   • senderId: $senderId');
+      _logger.i('   • senderName: $senderName');
+      _logger.i('   • receiverId: $receiverId');
+      _logger.i('   • chatId: $chatId');
+      _logger.i('   • message(len=${trimmed.length}): "$trimmed"');
+
+      // Fetch and log receiver FCM-related info before sending notification
+      try {
+        final receiverDoc = await _firestore.collection('users').doc(receiverId).get();
+        if (!receiverDoc.exists) {
+          _logger.w('⚠️ Receiver user not found in Firestore: $receiverId');
+        } else {
+          final data = receiverDoc.data() ?? {};
+          final rawToken = (data['fcmToken']?.toString() ?? '');
+          final tokenPreview = rawToken.isEmpty ? 'null' : '${rawToken.substring(0, rawToken.length.clamp(0, 12))}...';
+          _logger.i('👤 Receiver profile snapshot:');
+          _logger.i('   • fcmToken: $tokenPreview');
+          _logger.i('   • isOnline: ${data['isOnline'] ?? false}');
+          _logger.i('   • activeChatId: ${data['activeChatId'] ?? '(none)'}');
+        }
+      } catch (e) {
+        _logger.w('⚠️ Failed to read receiver FCM info: $e');
+      }
+
       // Create the message model first
       final messageModel = await _chatService.sendMessage(
-        senderId: currentUserId.value,
+        senderId: senderId,
         receiverId: receiverId,
-        message: message.trim(),
-        senderName: currentUser.value?.name ?? 'Unknown',
+        message: trimmed,
+        senderName: senderName,
         senderPhotoUrl: currentUser.value?.photoUrl,
       );
 
@@ -599,20 +635,21 @@ class ChatController extends GetxController {
         updateUserChats();
       }
 
-      // Enqueue push notification for the receiver via Firestore (processed by Cloud Function)
+      // Trigger push notification for the receiver via API server
       try {
-        final chatId = _chatService.getChatId(currentUserId.value, receiverId);
         await ChatFirebaseManager().sendChatNotification(
           receiverId: receiverId,
           chatId: chatId,
-          message: message.trim(),
-          senderName: currentUser.value?.name,
+          message: trimmed,
+          messageType: 'text',
+          senderName: senderName,
+          senderId: senderId,
         );
       } catch (e) {
-        _logger.w('Failed to enqueue notification: $e');
+        _logger.w('⚠️ Failed to enqueue notification: $e');
       }
 
-      _logger.i('Message sent successfully: ${messageModel.id}');
+      _logger.i('💡 Message sent successfully: ${messageModel?.id ?? '(null-id)'}');
 
     } on FirebaseException catch (e) {
       _logger.e('Firebase error sending message to user', error: e);
@@ -719,5 +756,46 @@ class ChatController extends GetxController {
       );
     }
   }
+  Future<void> sendVoiceMessage(String receiverId, String audioPath, int duration) async {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) return;
 
+      await _chatService.sendVoiceMessage(
+        senderId: currentUser.uid,
+        receiverId: receiverId,
+        senderName: currentUser.displayName ?? 'Unknown',
+        audioPath: audioPath,
+        duration: duration,
+        senderPhotoUrl: currentUser.photoURL,
+      );
+
+      // Show success feedback
+      Get.snackbar(
+        'Success',
+        'Voice message sent!',
+        backgroundColor: Colors.green.withOpacity(0.8),
+        colorText: Colors.white,
+        duration: const Duration(seconds: 2),
+      );
+    } catch (e) {
+      Get.snackbar(
+        'Error',
+        'Failed to send voice message: $e',
+        backgroundColor: Colors.red.withOpacity(0.8),
+        colorText: Colors.white,
+      );
+    }
+  }
+
+  // Method to handle audio file path conversion for playback
+  Future<String> getAudioFilePath(MessageModel message) async {
+    if (message.type == MessageType.audio) {
+      return await _chatService.saveAudioFromBase64(
+        message.content,
+        message.id,
+      );
+    }
+    return '';
+  }
 }

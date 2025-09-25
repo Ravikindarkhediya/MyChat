@@ -2,19 +2,24 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import '../controller/chat_controller.dart';
 import '../models/message_model.dart';
 import '../models/enums.dart';
+import '../services/chat_services/voice_message_widget.dart';
 
 class ChatBubble extends StatelessWidget {
   final MessageModel message;
   final bool isMe;
+  final ChatController chatController;
   final bool showTime;
   final bool showStatus;
+
 
   const ChatBubble({
     Key? key,
     required this.message,
     required this.isMe,
+    required this.chatController,
     this.showTime = false,
     this.showStatus = false,
   }) : super(key: key);
@@ -65,6 +70,38 @@ class ChatBubble extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildAudioMessage() {
+    return FutureBuilder<String>(
+      future: chatController.getAudioFilePath(message),
+      builder: (context, snapshot) {
+        if (snapshot.hasData) {
+          final duration = message.metadata['duration'] ?? '0:00';
+          return VoiceMessageWidget(
+            audioPath: snapshot.data!,
+            duration: duration,
+            isMe: isMe,
+          );
+        }
+        return Container(
+          width: 200,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Colors.white.withOpacity(0.1),
+                Colors.white.withOpacity(0.05),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Center(
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        );
+      },
     );
   }
 
@@ -191,7 +228,7 @@ class ChatBubble extends StatelessWidget {
       case MessageType.video:
         return _buildVideoMessage();
       case MessageType.audio:
-        return _buildAudioMessage();
+        return _buildAudioMessage(); // ✅ Updated FutureBuilder logic
       case MessageType.file:
         return _buildFileMessage();
       case MessageType.location:
@@ -332,62 +369,6 @@ class ChatBubble extends StatelessWidget {
     );
   }
 
-  Widget _buildAudioMessage() {
-    return Container(
-      width: 200,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Colors.white.withOpacity(0.1),
-            Colors.white.withOpacity(0.05),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.play_arrow_rounded,
-            color: Colors.white.withOpacity(0.8),
-            size: 28,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  height: 2,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(1),
-                  ),
-                  child: FractionallySizedBox(
-                    widthFactor: 0.4, // Simulate progress
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.8),
-                        borderRadius: BorderRadius.circular(1),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  message.metadata['duration'] ?? '0:00',
-                  style: GoogleFonts.poppins(
-                    fontSize: 11,
-                    color: Colors.white.withOpacity(0.7),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildFileMessage() {
     final fileName = message.metadata['fileName'] ?? 'Document';

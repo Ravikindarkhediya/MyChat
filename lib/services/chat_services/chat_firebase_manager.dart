@@ -7,6 +7,9 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../controller/auth_controller.dart';
+import '../notification_service/api_notification_service.dart';
+
 class ChatFirebaseManager {
   static final ChatFirebaseManager _instance = ChatFirebaseManager._internal();
   factory ChatFirebaseManager() => _instance;
@@ -115,6 +118,7 @@ class ChatFirebaseManager {
   // ✅ FCM TOKEN MANAGEMENT FOR CHAT
   // ================================
 
+  // ✅ Update the _saveFCMTokenToFirestore method in ChatFirebaseManager
   Future<void> _saveFCMTokenToFirestore() async {
     try {
       final String? fcmToken = await _firebaseMessaging.getToken();
@@ -125,7 +129,7 @@ class ChatFirebaseManager {
 
       print("📱 FCM TOKEN: $fcmToken");
 
-      // ✅ Save token to Firestore instead of API
+      // ✅ Save token to Firestore
       await _db.collection('users').doc(_currentUserId).set({
         'fcmToken': fcmToken,
         'deviceType': Platform.isIOS ? 'ios' : 'android',
@@ -134,7 +138,14 @@ class ChatFirebaseManager {
         'lastActive': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      print('✅ FCM token saved to Firestore');
+      // ✅ Also send to API server
+      await ApiNotificationService.updateFCMToken(
+        userId: _currentUserId!,
+        fcmToken: fcmToken,
+        deviceType: Platform.isIOS ? 'ios' : 'android',
+      );
+
+      print('✅ FCM token saved to Firestore and API');
 
       // ✅ Listen for token refresh
       _firebaseMessaging.onTokenRefresh.listen((newToken) {
@@ -146,17 +157,27 @@ class ChatFirebaseManager {
     }
   }
 
+// ✅ Update token refresh method
   Future<void> _updateTokenInFirestore(String newToken) async {
     try {
       await _db.collection('users').doc(_currentUserId).update({
         'fcmToken': newToken,
         'lastTokenUpdate': FieldValue.serverTimestamp(),
       });
-      print('✅ FCM token updated in Firestore');
+
+      // ✅ Also update on API server
+      await ApiNotificationService.updateFCMToken(
+        userId: _currentUserId!,
+        fcmToken: newToken,
+        deviceType: Platform.isIOS ? 'ios' : 'android',
+      );
+
+      print('✅ FCM token updated in Firestore and API');
     } catch (e) {
       print('❌ Error updating FCM token: $e');
     }
   }
+
 
   // ================================
   // ✅ CHAT-SPECIFIC MESSAGE HANDLERS
@@ -314,54 +335,36 @@ class ChatFirebaseManager {
     required String receiverId,
     required String chatId,
     required String message,
+    required String senderId, // ✅ Make it required parameter
     String? messageType,
     String? senderName,
   }) async {
     try {
-      // ✅ Get receiver's FCM token from Firestore
-      final userDoc = await _db.collection('users').doc(receiverId).get();
+      print('🚀 Starting API notification call...');
+      print('📋 Data: receiverId=$receiverId, senderId=$senderId, chatId=$chatId');
 
-      if (!userDoc.exists) {
-        print('❌ Receiver not found: $receiverId');
-        return;
+      final success = await ApiNotificationService.sendNotification(
+        receiverId: receiverId,
+        senderId: senderId, // ✅ Use passed senderId
+        senderName: senderName ?? 'Unknown User',
+        message: message,
+        chatId: chatId,
+        messageType: messageType ?? 'text',
+      );
+
+      print('📤 API notification result: $success');
+
+      if (success) {
+        print('✅ Chat notification sent via API successfully');
+      } else {
+        print('❌ Failed to send chat notification via API');
       }
-
-      final userData = userDoc.data()!;
-      final String? fcmToken = userData['fcmToken'];
-      final bool isOnline = userData['isOnline'] ?? false;
-      final String? activeChat = userData['activeChatId'];
-
-      if (fcmToken == null || fcmToken.isEmpty) {
-        print('❌ No FCM token for receiver: $receiverId');
-        return;
-      }
-
-      // ✅ Don't send if user is online and viewing same chat
-      if (isOnline && activeChat == chatId) {
-        print('🔇 User is viewing this chat, skipping notification');
-        return;
-      }
-
-      // ✅ Use HTTP v1 API or store for Cloud Function processing
-      // For now, store in Firestore for Cloud Function to process
-      await _db.collection('pending_notifications').add({
-        'receiverId': receiverId,
-        'senderId': _currentUserId,
-        'senderName': senderName ?? _currentUserName ?? 'Unknown User',
-        'chatId': chatId,
-        'message': message,
-        'messageType': messageType ?? 'text',
-        'fcmToken': fcmToken,
-        'timestamp': FieldValue.serverTimestamp(),
-        'processed': false,
-      });
-
-      print('✅ Chat notification queued for processing');
 
     } catch (e) {
       print('❌ Error sending chat notification: $e');
     }
   }
+
 
   // ================================
   // ✅ UTILITY METHODS
