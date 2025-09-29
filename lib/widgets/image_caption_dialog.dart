@@ -78,11 +78,11 @@ class _ImageCaptionDialogState extends State<ImageCaptionDialog> {
                 ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.white24),
+                  borderSide: const BorderSide(color: Colors.white24),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.blue),
+                  borderSide: const BorderSide(color: Colors.blue),
                 ),
                 filled: true,
                 fillColor: Colors.white.withOpacity(0.1),
@@ -127,7 +127,7 @@ class _ImageCaptionDialogState extends State<ImageCaptionDialog> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.send, size: 16, color: Colors.white),
+                      const Icon(Icons.send, size: 16, color: Colors.white),
                       const SizedBox(width: 4),
                       Text(
                         'Send',

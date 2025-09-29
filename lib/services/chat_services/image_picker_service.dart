@@ -90,7 +90,7 @@ class ImagePickerService {
     return await Get.dialog<File?>(
       AlertDialog(
         backgroundColor: Colors.grey[900],
-        title: Text(
+        title: const Text(
           'Select Image',
           style: TextStyle(color: Colors.white),
         ),
@@ -106,8 +106,8 @@ class ImagePickerService {
               },
             ),
             ListTile(
-              leading: Icon(Icons.photo_library, color: Colors.green),
-              title: Text('Gallery', style: TextStyle(color: Colors.white)),
+              leading: const Icon(Icons.photo_library, color: Colors.green),
+              title: const Text('Gallery', style: TextStyle(color: Colors.white)),
               onTap: () async {
                 final image = await pickImageFromGallery();
                 Get.back(result: image);

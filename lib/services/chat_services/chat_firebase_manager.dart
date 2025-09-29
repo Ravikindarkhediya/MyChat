@@ -67,7 +67,7 @@ class ChatFirebaseManager {
   Future<void> _initializeLocalNotifications() async {
     // ✅ Chat-specific Android settings
     const AndroidInitializationSettings initializationSettingsAndroid =
-    AndroidInitializationSettings('@drawable/ic_stat_mind_zora');
+    AndroidInitializationSettings('@mipmap/ic_launcher');
 
     const DarwinInitializationSettings initializationSettingsIOS =
     DarwinInitializationSettings(
@@ -76,7 +76,7 @@ class ChatFirebaseManager {
       requestSoundPermission: true,
     );
 
-    final InitializationSettings initializationSettings = InitializationSettings(
+    final InitializationSettings initializationSettings = const InitializationSettings(
       android: initializationSettingsAndroid,
       iOS: initializationSettingsIOS,
     );
@@ -85,7 +85,7 @@ class ChatFirebaseManager {
       initializationSettings,
       onDidReceiveNotificationResponse: (NotificationResponse response) {
         if (response.payload != null) {
-          print("💬 Chat notification payload: ${response.payload}");
+          print('💬 Chat notification payload: ${response.payload}');
           _handleChatNotificationClick(response.payload!);
         }
       },
@@ -127,7 +127,7 @@ class ChatFirebaseManager {
         return;
       }
 
-      print("📱 FCM TOKEN: $fcmToken");
+      print('📱 FCM TOKEN: $fcmToken');
 
       // ✅ Save token to Firestore
       await _db.collection('users').doc(_currentUserId).set({
@@ -227,17 +227,17 @@ class ChatFirebaseManager {
     final String messageType = message.data['messageType'] ?? 'text';
 
     // ✅ Format notification body based on message type
-    String notificationBody = _formatChatNotificationBody(messageText, messageType);
+    final String notificationBody = _formatChatNotificationBody(messageText, messageType);
 
     // ✅ Chat-specific Android notification settings
-    AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'chat_messages', // Use the channel we created
       'Chat Messages',
       importance: Importance.high,
       priority: Priority.high,
       ticker: '$senderName sent a message',
-      icon: '@drawable/ic_stat_mind_zora',
-      largeIcon: DrawableResourceAndroidBitmap('@drawable/ic_chat_avatar'),
+      icon: '@mipmap/ic_launcher',
+      largeIcon: const DrawableResourceAndroidBitmap('@drawable/ic_chat_avatar'),
       enableVibration: true,
       enableLights: true,
       playSound: true,
@@ -434,55 +434,6 @@ class ChatFirebaseManager {
     }
   }
 
-  Future<void> clearActiveChatId() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('active_chat_id');
-
-      await _db.collection('users').doc(_currentUserId).update({
-        'activeChatId': FieldValue.delete(),
-      });
-    } catch (e) {
-      print('❌ Error clearing active chat: $e');
-    }
-  }
-
-  // ================================
-  // ✅ CLEANUP METHODS
-  // ================================
-
-  Future<void> deleteFCMToken() async {
-    try {
-      await _firebaseMessaging.deleteToken();
-
-      // ✅ Also remove from Firestore
-      if (_currentUserId != null) {
-        await _db.collection('users').doc(_currentUserId).update({
-          'fcmToken': FieldValue.delete(),
-          'isOnline': false,
-        });
-      }
-
-      print('✅ FCM token deleted successfully');
-    } catch (e) {
-      print('❌ Failed to delete FCM token: $e');
-    }
-  }
-
-  Future<void> signOut() async {
-    try {
-      await updateUserOnlineStatus(false);
-      await clearActiveChatId();
-      await deleteFCMToken();
-
-      _currentUserId = null;
-      _currentUserName = null;
-
-      print('✅ User signed out successfully');
-    } catch (e) {
-      print('❌ Error during sign out: $e');
-    }
-  }
 }
 
 // ================================

@@ -272,4 +272,60 @@ class UserService {
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
+
+
+  Future<void> setUserOnline(String userId) async {
+    try {
+      await _firestore.collection('users').doc(userId).update({
+        'isOnline': true,
+        // Do not overwrite lastSeen when going online; it should reflect last offline time
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('❌ Error setting user online: $e');
+    }
+  }
+
+  // ✅ YE METHOD ADD KARO - USER KO OFFLINE SET KARNE KE LIYE
+  Future<void> setUserOffline(String userId) async {
+    try {
+      await _firestore.collection('users').doc(userId).update({
+        'isOnline': false,
+        'lastSeen': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('❌ Error setting user offline: $e');
+    }
+  }
+
+  // ✅ YE METHOD ADD KARO - SPECIFIC USER KA ONLINE STATUS STREAM
+  Stream<bool> getUserOnlineStatus(String userId) {
+    return _firestore
+        .collection('users')
+        .doc(userId)
+        .snapshots()
+        .map((doc) {
+      if (doc.exists) {
+        final data = doc.data();
+        return data?['isOnline'] ?? false;
+      }
+      return false;
+    });
+  }
+
+  // ✅ YE METHOD ADD KARO - USER DATA KA COMPLETE STREAM
+  Stream<UserModel?> getUserStream(String userId) {
+    return _firestore
+        .collection('users')
+        .doc(userId)
+        .snapshots()
+        .map((doc) {
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        return UserModel.fromMap({...data, 'uid': userId});
+      }
+      return null;
+    });
+  }
+
 }

@@ -17,6 +17,13 @@ class ChatService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final _logger = Logger();
+  String? _recentlyReadChatId;
+  String? get _currentUserId => _auth.currentUser?.uid;
+
+
+  void setRecentlyReadChat(String chatId) {
+    _recentlyReadChatId = chatId;
+  }
 
   String getChatId(String user1, String user2) {
     if (user1.isEmpty || user2.isEmpty) {
@@ -214,14 +221,14 @@ class ChatService {
   // All other existing methods remain unchanged...
   Future<void> markMessagesAsRead(String chatId, String userId) async {
     try {
-      await _db.collection("chats").doc(chatId).update({
+      await _db.collection('chats').doc(chatId).update({
         'unreadCount_$userId': 0,
       });
 
       final messages = await _db
-          .collection("chats")
+          .collection('chats')
           .doc(chatId)
-          .collection("messages")
+          .collection('messages')
           .where('receiverId', isEqualTo: userId)
           .where('isRead', isEqualTo: false)
           .get();
@@ -263,13 +270,13 @@ class ChatService {
         return !deletedFor.contains(currentUserId);
       });
 
+      // Preserve Firestore's descending order so it works with ListView.reverse = true
       return filteredDocs
           .map((doc) => MessageModel.fromMap({
-        ...doc.data(),
-        'id': doc.id,
-      }))
-          .toList()
-        ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+                ...doc.data(),
+                'id': doc.id,
+              }))
+          .toList();
     });
   }
 
@@ -280,13 +287,23 @@ class ChatService {
         .where('participants', arrayContains: userId)
         .orderBy('updatedAt', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs
-        .map((doc) => ChatSummary.fromMap({
-      ...doc.data(),
-      'id': doc.id,
-    }))
-        .toList());
+        .map((snapshot) => snapshot.docs.map((doc) {
+      final data = {
+        ...doc.data(),
+        'id': doc.id,
+      };
+
+      if (_recentlyReadChatId == doc.id) {
+        data['unreadCounts'] = {
+          ...(data['unreadCounts'] ?? {}),
+          _currentUserId: 0,
+        };
+      }
+
+      return ChatSummary.fromMap(data);
+    }).toList());
   }
+
 
   Future<List<ChatSummary>> fetchUserChats(String userId) async {
     if (userId.isEmpty) return [];
@@ -439,16 +456,16 @@ class ChatService {
     try {
       if (deleteForEveryone) {
         await _db
-            .collection("chats")
+            .collection('chats')
             .doc(chatId)
-            .collection("messages")
+            .collection('messages')
             .doc(messageId)
             .delete();
       } else {
         await _db
-            .collection("chats")
+            .collection('chats')
             .doc(chatId)
-            .collection("messages")
+            .collection('messages')
             .doc(messageId)
             .update({
           'deletedFor': FieldValue.arrayUnion([currentUserId]),
@@ -469,9 +486,9 @@ class ChatService {
   }) async {
     try {
       final messageRef = _db
-          .collection("chats")
+          .collection('chats')
           .doc(chatId)
-          .collection("messages")
+          .collection('messages')
           .doc(messageId);
 
       final updateData = {
@@ -494,4 +511,26 @@ class ChatService {
       return null;
     }
   }
+
+
+  Future<void> markChatAsRead(String chatId, String userId) async {
+    final chatDoc = FirebaseFirestore.instance.collection('chats').doc(chatId);
+
+    await chatDoc.update({
+      'unreadCount_$userId': 0,
+    });
+
+    // Optionally, update `readBy` for lastMessage too
+    await chatDoc.collection('messages')
+        .where('readBy', arrayContains: userId)
+        .get()
+        .then((snap) {
+      for (var doc in snap.docs) {
+        doc.reference.update({
+          'readBy': FieldValue.arrayUnion([userId]),
+        });
+      }
+    });
+  }
+
 }

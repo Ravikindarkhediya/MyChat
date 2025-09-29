@@ -16,8 +16,6 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // ✅ Remove this line - we're using ChatFirebaseManager instead
-  // await FirebaseNotificationService.initializeBackgroundHandler();
 
   // ✅ Add ChatFirebaseManager background handler
   FirebaseMessaging.onBackgroundMessage(_chatBackgroundMessageHandler);
@@ -52,5 +50,7 @@ class MyApp extends StatelessWidget {
       ),
     );
   }
+
+
 }
 

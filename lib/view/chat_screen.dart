@@ -4,6 +4,7 @@ import 'package:ads_demo/services/calling_service.dart';
 import 'package:ads_demo/services/chat_services/chat_services.dart';
 import 'package:ads_demo/services/user_service.dart';
 import 'package:animated_background/animated_background.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -14,6 +15,8 @@ import '../models/user_model.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/glass.dart';
 import '../widgets/message_input_widget.dart';
+import 'chat_screen_widgets/appbar_action.dart';
+import 'chat_screen_widgets/popup_widget.dart';
 import 'home_page.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -38,6 +41,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   bool _isLoading = true;
   bool _isTyping = false;
   UserModel? _peerUser;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  User? get currentFirebaseUser => _auth.currentUser;
 
   late AnimationController _fadeController;
   late AnimationController _slideController;
@@ -48,9 +54,25 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   int _behaviourIndex = 0;
   Behaviour? _behaviour;
 
+  String _formatLastSeen(DateTime lastSeen) {
+    final now = DateTime.now();
+    final diff = now.difference(lastSeen);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inHours < 1) return '${diff.inMinutes} min ago';
+    if (diff.inDays < 1) return '${diff.inHours} hr ago';
+    return '${lastSeen.day}/${lastSeen.month}/${lastSeen.year}';
+  }
+
   @override
   void initState() {
     super.initState();
+
+    if (widget.peerUser?.uid != null) {
+      _chatController.listenToTypingStatus(widget.peerUser!.uid);
+      _chatController.listenToPeerOnlineStatus(widget.peerUser!.uid);
+    }
+
+    _chatController.setCurrentUserOnline();
     _initializeAnimations();
     _initializeChat();
     _messageController.addListener(_onTextChanged);
@@ -114,6 +136,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   @override
   void dispose() {
     _messageController.removeListener(_onTextChanged);
+    // Ensure typing status is cleared when leaving the screen
+    if (widget.peerUser?.uid != null) {
+      _chatController.updateTypingStatus(widget.peerUser!.uid, false);
+    }
     _messageController.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
@@ -121,43 +147,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     _slideController.dispose();
     super.dispose();
   }
-
-  void _scrollToBottom() {
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    }
-  }
-
-  Future<void> _sendMessage() async {
-    if (_messageController.text.trim().isEmpty) return;
-
-    final message = _messageController.text.trim();
-    _messageController.clear();
-    setState(() => _isTyping = false);
-
-    try {
-      await _chatController.sendMessageToUser(
-        widget.peerUser?.uid ?? '',
-        message,
-      );
-      _scrollToBottom();
-    } catch (e) {
-      Get.snackbar(
-        'Error',
-        'Failed to send message: $e',
-        backgroundColor: Colors.red.withOpacity(0.8),
-        colorText: Colors.white,
-      );
-      _messageController.text = message;
-      setState(() => _isTyping = true);
-    }
-  }
-
-
 
   Widget _buildMessageList() {
     return StreamBuilder<List<MessageModel>>(
@@ -319,21 +308,31 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildMessageInput() {
-    return MessageInputWidget(
-      onSendTextMessage: (message) {
-        _chatController.sendMessageToUser(_peerUser!.uid, message);
-      },
-      onSendVoiceMessage: (audioPath, duration) {
-        _chatController.sendVoiceMessage(
-          _peerUser!.uid,
-          audioPath,
-          duration,
-        );
-      },
-      onCameraPressed: () {
-        print(_peerUser!.uid);
-        _chatController.uploadSmallImage(_peerUser!.uid);
-      },
+    return Column(
+      children: [
+        //  TYPING INDICATOR KO COLUMN MEIN ADD KARO
+        _buildTypingIndicator(),
+
+        MessageInputWidget(
+          onSendTextMessage: (message) {
+            _chatController.sendMessageToUser(_peerUser!.uid, message);
+          },
+          onSendVoiceMessage: (audioPath, duration) {
+            _chatController.sendVoiceMessage(
+              _peerUser!.uid,
+              audioPath,
+              duration,
+            );
+          },
+          onCameraPressed: () {
+            print(_peerUser!.uid);
+            _chatController.uploadSmallImage(_peerUser!.uid);
+          },
+          onTypingChanged: (isTyping) {
+            _chatController.updateTypingStatus(_peerUser!.uid, isTyping);
+          },
+        ),
+      ],
     );
   }
 
@@ -388,6 +387,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
             child: AppBar(
+              titleSpacing: 0,
               elevation: 0,
               backgroundColor: Colors.transparent,
               flexibleSpace: Container(
@@ -447,7 +447,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                           ],
                         ),
                       ),
-                      padding: const EdgeInsets.all(2),
                       child: CircleAvatar(
                         radius: 20,
                         backgroundColor: Colors.grey[300],
@@ -483,29 +482,42 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
-                        Row(
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _peerUser?.isOnline == true
-                                    ? Colors.greenAccent
-                                    : Colors.grey[400],
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              _peerUser?.isOnline == true
-                                  ? 'Online'
-                                  : 'Offline',
-                              style: GoogleFonts.poppins(
-                                fontSize: 12,
-                                color: Colors.white.withOpacity(0.7),
-                              ),
-                            ),
-                          ],
+                        // Live presence + last seen
+                        StreamBuilder<UserModel?>(
+                          stream: userService.getUserStream(widget.peerUser?.uid ?? ''),
+                          builder: (context, snapshot) {
+                            final user = snapshot.data ?? _peerUser;
+                            final isOnline = user?.isOnline == true;
+                            final lastSeen = user?.lastSeen;
+                            final subtitle = isOnline
+                                ? 'Online'
+                                : (lastSeen != null
+                                    ? 'last seen ${_formatLastSeen(lastSeen)}'
+                                    : 'Offline');
+                            return Row(
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: isOnline
+                                        ? Colors.greenAccent
+                                        : Colors.grey[400],
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  subtitle,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    color: Colors.white.withOpacity(0.7),
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            );
+                          },
                         ),
                       ],
                     ),
@@ -513,11 +525,19 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                 ],
               ),
               actions: [
-                _buildAppBarAction(Icons.videocam_rounded, () {
-                  // TODO: Implement video call
+                buildAppBarAction(Icons.videocam_rounded, () {
+                  CallingService().startVideoCall(
+                    _peerUser!.uid,
+                    currentFirebaseUser!.displayName ?? '',
+                    currentFirebaseUser!.uid,
+                  );
                 }),
-                _buildAppBarAction(Icons.call_rounded, () {
-                  // CallingService().joinMeeting(isAudioOnly: true);
+                buildAppBarAction(Icons.call_rounded, () {
+                  CallingService().startVideoCall(
+                    _peerUser!.uid,
+                    currentFirebaseUser!.displayName ?? '',
+                    currentFirebaseUser!.uid,
+                  );
                 }),
                 PopupMenuButton<String>(
                   icon: Icon(
@@ -570,17 +590,17 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                     }
                   },
                   itemBuilder: (BuildContext context) => [
-                    _buildPopupMenuItem(
+                    buildPopupMenuItem(
                       'mute',
                       Icons.notifications_off_rounded,
                       'Mute Notifications',
                     ),
-                    _buildPopupMenuItem(
-                      'clear_chat',
-                      Icons.delete_rounded,
+                    buildPopupMenuItem(
+                      'clear_for_me',
+                      Icons.notifications_off_rounded,
                       'Clear Chat',
                     ),
-                    _buildPopupMenuItem(
+                    buildPopupMenuItem(
                       'block',
                       Icons.block_rounded,
                       'Delete User',
@@ -672,77 +692,51 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildAppBarAction(IconData icon, VoidCallback onPressed) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 4),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onPressed,
-          child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              gradient: LinearGradient(
-                colors: [
-                  Colors.white.withOpacity(0.1),
-                  Colors.white.withOpacity(0.05),
-                ],
-              ),
-            ),
-            child: Icon(icon, color: Colors.white.withOpacity(0.8), size: 20),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget _buildTypingIndicator() {
+    return Obx(() {
+      final isOtherUserTyping =
+          _chatController.typingUsers[_peerUser!.uid] ?? false;
 
-  PopupMenuItem<String> _buildPopupMenuItem(
-    String value,
-    IconData icon,
-    String text,
-  ) {
-    return PopupMenuItem<String>(
-      value: value,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Colors.white.withOpacity(0.15),
-                  Colors.white.withOpacity(0.05),
-                ],
+      if (!isOtherUserTyping) return const SizedBox.shrink();
+
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.grey.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12),
               ),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.white.withOpacity(0.1),
-                width: 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(icon, color: Colors.white.withOpacity(0.8), size: 18),
-                const SizedBox(width: 12),
-                Text(
-                  text,
-                  style: GoogleFonts.poppins(
-                    color: Colors.white.withOpacity(0.9),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Animated typing dots
+                  ...List.generate(
+                    3,
+                    (index) => AnimatedContainer(
+                      duration: Duration(milliseconds: 300 + (index * 100)),
+                      margin: const EdgeInsets.symmetric(horizontal: 1),
+                      width: 4,
+                      height: 4,
+                      decoration: const BoxDecoration(
+                        color: Colors.grey,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  const Text(
+                    'typing...',
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                ],
+              ),
             ),
-          ),
+          ],
         ),
-      ),
-    );
+      );
+    });
   }
-
 }

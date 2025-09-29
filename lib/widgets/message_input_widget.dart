@@ -7,12 +7,13 @@ class MessageInputWidget extends StatefulWidget {
   final Function(String) onSendTextMessage;
   final Function(String, int) onSendVoiceMessage;
   final VoidCallback onCameraPressed;
+  final Function(bool)? onTypingChanged;
 
   const MessageInputWidget({
     Key? key,
     required this.onSendTextMessage,
     required this.onSendVoiceMessage,
-    required this.onCameraPressed,
+    required this.onCameraPressed,this.onTypingChanged,
   }) : super(key: key);
 
   @override
@@ -52,10 +53,17 @@ class _MessageInputWidgetState extends State<MessageInputWidget>
   }
 
   void _onTextChanged() {
-    setState(() {
-      _isTyping = _messageController.text.trim().isNotEmpty;
-    });
+    final isCurrentlyTyping = _messageController.text.trim().isNotEmpty;
+
+    if (_isTyping != isCurrentlyTyping) {
+      setState(() {
+        _isTyping = isCurrentlyTyping;
+      });
+
+      widget.onTypingChanged?.call(_isTyping);
+    }
   }
+
 
   Future<void> _handleVoiceRecording() async {
     if (_isRecording) {

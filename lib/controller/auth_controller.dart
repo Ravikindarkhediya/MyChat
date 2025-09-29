@@ -316,7 +316,9 @@ class AuthController extends GetxController {
       await _auth.signOut();
     }
   }
-  
+
+
+
   /// Handles the signed-out user state
   void _handleSignedOut() {
     _logger.d('User signed out');

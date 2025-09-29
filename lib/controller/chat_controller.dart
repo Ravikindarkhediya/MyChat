@@ -17,9 +17,10 @@ import '../models/user_model.dart';
 import '../services/chat_services/chat_firebase_manager.dart';
 import '../services/chat_services/chat_services.dart';
 import '../services/chat_services/voice_recording_service.dart';
+import '../services/notification_service/api_notification_service.dart';
 import '../services/user_service.dart';
 
-class ChatController extends GetxController {
+class ChatController extends GetxController with WidgetsBindingObserver {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final ChatService _chatService = ChatService();
@@ -27,6 +28,7 @@ class ChatController extends GetxController {
   final _logger = Logger();
   late final StreamSubscription _networkSub;
   final Common common = Common();
+
   // Constructor parameters
   final String userId;
   final String? peerId;
@@ -49,6 +51,8 @@ class ChatController extends GetxController {
   final GoogleSignIn _googleSignIn = GoogleSignIn();
   var userChats = <ChatSummary>[].obs;
   final RxList<String> sentRequests = <String>[].obs;
+  final RxBool isPeerUserOnline = false.obs;
+  StreamSubscription? _peerOnlineStatusSubscription;
 
   // Controllers
   final TextEditingController messageController = TextEditingController();
@@ -75,14 +79,19 @@ class ChatController extends GetxController {
   void onInit() {
     super.onInit();
 
+    // Observe app lifecycle for presence updates
+    WidgetsBinding.instance.addObserver(this);
+
     _listenToUserChats();
     _networkSub = Common().setupNetworkListener(
       currentUserId: currentUserId,
       onRestore: _loadInitialData,
     );
     _setupSubscriptions();
-  }
 
+    // Try to set online at startup
+    setCurrentUserOnline();
+  }
 
   void listenSentRequests() {
     _firestore
@@ -90,10 +99,38 @@ class ChatController extends GetxController {
         .where('senderId', isEqualTo: currentUserId.value)
         .snapshots()
         .listen((query) {
-      sentRequests.value = query.docs.map((d) => d['receiverId'] as String).toList();
+          sentRequests.value = query.docs
+              .map((d) => d['receiverId'] as String)
+              .toList();
+        });
+  }
+  void listenToPeerOnlineStatus(String peerId) {
+    if (peerId.isEmpty) return;
+
+    // Cancel previous subscription if any
+    _peerOnlineStatusSubscription?.cancel();
+
+    // Listen to peer user's online status
+    _peerOnlineStatusSubscription = _userService
+        .getUserOnlineStatus(peerId)
+        .listen((isOnline) {
+      isPeerUserOnline.value = isOnline;
     });
   }
 
+  // ✅ YE METHOD ADD KARO - CURRENT USER KO ONLINE SET KARNE KE LIYE
+  Future<void> setCurrentUserOnline() async {
+    if (currentUserId.value.isNotEmpty) {
+      await _userService.setUserOnline(currentUserId.value);
+    }
+  }
+
+  // ✅ YE METHOD ADD KARO - CURRENT USER KO OFFLINE SET KARNE KE LIYE
+  Future<void> setCurrentUserOffline() async {
+    if (currentUserId.value.isNotEmpty) {
+      await _userService.setUserOffline(currentUserId.value);
+    }
+  }
   void _listenToUserChats() {
     // Cancel old subscription if any
     _userChatsSubscription?.cancel();
@@ -101,20 +138,22 @@ class ChatController extends GetxController {
     // Only subscribe if currentUserId available
     if (currentUserId.value.isEmpty) return;
 
-    _userChatsSubscription = _chatService.getUserChats(currentUserId.value).listen(
+    _userChatsSubscription = _chatService
+        .getUserChats(currentUserId.value)
+        .listen(
           (chats) {
-        userChats.value = chats;
-      },
-      onError: (error) {
-        _logger.e('Error in user chats stream', error: error);
-      },
-    );
+            userChats.value = chats;
+          },
+          onError: (error) {
+            _logger.e('Error in user chats stream', error: error);
+          },
+        );
   }
-  
+
   Future<void> updateUserChats() async {
     try {
       if (currentUserId.value.isEmpty) return;
-      
+
       // चैट सर्विस से नवीनतम चैट्स प्राप्त करें
       final chats = await _chatService.fetchUserChats(currentUserId.value);
       if (chats != null) {
@@ -125,19 +164,35 @@ class ChatController extends GetxController {
     }
   }
 
-
   @override
   void onClose() {
+    // Remove lifecycle observer
+    WidgetsBinding.instance.removeObserver(this);
     // Cancel all subscriptions when controller is disposed
     for (var subscription in _subscriptions) {
       subscription.cancel();
     }
+
+    _peerOnlineStatusSubscription?.cancel();
+    setCurrentUserOffline();
     _userChatsSubscription?.cancel();
     _typingTimer?.cancel();
     messageController.dispose();
     searchController.dispose();
     emailController.dispose();
     super.onClose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Update presence based on lifecycle
+    if (state == AppLifecycleState.resumed) {
+      setCurrentUserOnline();
+    } else if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      setCurrentUserOffline();
+    }
   }
 
   void _setupSubscriptions() {
@@ -153,7 +208,7 @@ class ChatController extends GetxController {
     if (currentUserId.value.isNotEmpty) {
       _subscriptions.add(
         _userService.getCurrentUserStream().listen(
-              (user) {
+          (user) {
             if (user != null) {
               currentUser.value = user;
               _listenToUserChats();
@@ -183,7 +238,7 @@ class ChatController extends GetxController {
     searchController.addListener(_searchListener);
 
     // Step 4: Typing listener
-    messageController.addListener(_onTypingChanged);
+    // messageController.addListener(_onTypingChanged);
 
     // Step 5: Resubscribe chats when currentUserId changes later
     ever<String>(currentUserId, (id) {
@@ -193,76 +248,108 @@ class ChatController extends GetxController {
     });
   }
 
+  // void _onTypingChanged() {
+  //   if (peerId == null) return;
+  //
+  //   final isCurrentlyTyping = messageController.text.trim().isNotEmpty;
+  //   if (isTyping.value != isCurrentlyTyping) {
+  //     isTyping.value = isCurrentlyTyping;
+  //     _updateTypingStatus(isCurrentlyTyping);
+  //   }
+  //
+  //   // Reset typing after 3 seconds of inactivity
+  //   _typingTimer?.cancel();
+  //   if (isCurrentlyTyping) {
+  //     _typingTimer = Timer(const Duration(seconds: 3), () {
+  //       if (isTyping.value) {
+  //         isTyping.value = false;
+  //         _updateTypingStatus(false);
+  //       }
+  //     });
+  //   }
+  // }
 
-  void _onTypingChanged() {
-    if (peerId == null) return;
-
-    final isCurrentlyTyping = messageController.text.trim().isNotEmpty;
-    if (isTyping.value != isCurrentlyTyping) {
-      isTyping.value = isCurrentlyTyping;
-      _updateTypingStatus(isCurrentlyTyping);
-    }
-
-    // Reset typing after 3 seconds of inactivity
-    _typingTimer?.cancel();
-    if (isCurrentlyTyping) {
-      _typingTimer = Timer(const Duration(seconds: 3), () {
-        if (isTyping.value) {
-          isTyping.value = false;
-          _updateTypingStatus(false);
-        }
-      });
-    }
-  }
-
-  // चैट मैसेज को क्लियर करने के लिए मेथड
   void clearChatMessages(String friendUserId) {
     if (friendUserId.isEmpty) return;
-    
+
     final chatId = _chatService.getChatId(currentUserId.value, friendUserId);
-    
-    // मैसेज लिस्ट से सभी मैसेज हटाएं
+
     messages.clear();
     messages.refresh();
-    
-    // होम स्क्रीन पर लास्ट मैसेज अपडेट करें
-    final index = userChats.indexWhere((chat) => 
-      chat.chatId == chatId || 
-      (chat.participants.contains(currentUserId.value) && 
-       chat.participants.contains(friendUserId))
+
+    final index = userChats.indexWhere(
+      (chat) =>
+          chat.chatId == chatId ||
+          (chat.participants.contains(currentUserId.value) &&
+              chat.participants.contains(friendUserId)),
     );
-    
+
     if (index != -1) {
       userChats[index] = userChats[index].copyWith(lastMessage: '');
       userChats.refresh();
     }
   }
 
-  Future<void> _updateTypingStatus(bool typing) async {
-    if (peerId == null) return;
+  Future<void> updateTypingStatus(String peerId, bool isTyping) async {
+    if (peerId.isEmpty || currentUserId.value.isEmpty) return;
 
     try {
-      final chatId = _chatService.getChatId(currentUserId.value, peerId!);
+      final chatId = _chatService.getChatId(currentUserId.value, peerId);
+
       await _firestore
           .collection('chats')
           .doc(chatId)
           .collection('typing')
           .doc(currentUserId.value)
           .set({
-        'isTyping': typing,
+        'isTyping': isTyping,
         'timestamp': FieldValue.serverTimestamp(),
         'userId': currentUserId.value,
+        'userName': currentUser.value?.name ?? 'Unknown',
       });
+
+      _logger.i('✅ Typing status updated: $isTyping for chat: $chatId');
     } catch (e) {
-      _logger.e('Error updating typing status', error: e);
+      _logger.e('❌ Error updating typing status', error: e);
     }
+  }
+
+  void listenToTypingStatus(String peerId) {
+    if (peerId.isEmpty || currentUserId.value.isEmpty) return;
+
+    final chatId = _chatService.getChatId(currentUserId.value, peerId);
+
+    _firestore
+        .collection('chats')
+        .doc(chatId)
+        .collection('typing')
+        .doc(peerId) // Other user ka typing status
+        .snapshots()
+        .listen((doc) {
+      if (doc.exists) {
+        final data = doc.data();
+        final isTyping = data?['isTyping'] ?? false;
+
+        // Update typing status for this user
+        typingUsers[peerId] = isTyping;
+
+        // Auto-clear typing status after 3 seconds
+        if (isTyping) {
+          Timer(const Duration(seconds: 3), () {
+            if (typingUsers[peerId] == true) {
+              typingUsers[peerId] = false;
+            }
+          });
+        }
+      }
+    });
   }
 
   Future<void> _loadUserData() async {
     try {
       final userData = await _chatService.getUserData(currentUserId.value);
       if (userData != null) {
-        currentUser.value =userData;
+        currentUser.value = userData;
         _loadInitialData();
       }
     } catch (e) {
@@ -275,11 +362,7 @@ class ChatController extends GetxController {
 
     try {
       isLoading.value = true;
-      await Future.wait([
-        _loadUsers(),
-        loadFriends(),
-        fetchFriendRequests(),
-      ]);
+      await Future.wait([_loadUsers(), loadFriends(), fetchFriendRequests()]);
     } catch (e) {
       _logger.e('Error loading initial data', error: e);
       common.showSnackbar('Error', 'Failed to load users', Colors.red);
@@ -294,7 +377,7 @@ class ChatController extends GetxController {
       final usersStream = _userService.getFriendsStream(currentUserId.value);
       _subscriptions.add(
         usersStream.listen(
-              (userList) => users.value = userList,
+          (userList) => users.value = userList,
           onError: (error) {
             _logger.e('Error in users stream', error: error);
           },
@@ -303,7 +386,6 @@ class ChatController extends GetxController {
     } on FirebaseException catch (e) {
       _logger.e('Firebase error loading users', error: e);
       common.showSnackbar('Error', 'Failed to load users', Colors.red);
-
     } catch (e) {
       _logger.e('Unexpected error loading users', error: e);
       rethrow;
@@ -316,7 +398,9 @@ class ChatController extends GetxController {
 
     try {
       final userDoc = await _firestore.collection('users').doc(userId).get();
-      final requestIds = List<String>.from(userDoc.data()?['friendRequests'] ?? []);
+      final requestIds = List<String>.from(
+        userDoc.data()?['friendRequests'] ?? [],
+      );
 
       if (requestIds.isEmpty) {
         friendRequests.clear();
@@ -335,12 +419,14 @@ class ChatController extends GetxController {
         if (senderId != null) {
           final senderData = await _chatService.getUserData(senderId);
           if (senderData != null) {
-            loadedRequests.add(FriendRequest(
-              id: doc.id,
-              senderId: senderId,
-              sender: senderData,
-              status: status,
-            ));
+            loadedRequests.add(
+              FriendRequest(
+                id: doc.id,
+                senderId: senderId,
+                sender: senderData,
+                status: status,
+              ),
+            );
           }
         }
       }
@@ -351,7 +437,6 @@ class ChatController extends GetxController {
       friendRequests.clear();
     }
   }
-
 
   // Load current user's friends
   Future<void> loadFriends() async {
@@ -395,14 +480,18 @@ class ChatController extends GetxController {
       final batch = _firestore.batch();
 
       // Update friend request status
-      final requestRef = _firestore.collection('friend_requests').doc(requestId);
+      final requestRef = _firestore
+          .collection('friend_requests')
+          .doc(requestId);
       batch.update(requestRef, {
         'status': 'accepted',
         'acceptedAt': FieldValue.serverTimestamp(),
       });
 
       // Add to current user's friends
-      final currentUserRef = _firestore.collection('users').doc(currentUserId.value);
+      final currentUserRef = _firestore
+          .collection('users')
+          .doc(currentUserId.value);
       batch.update(currentUserRef, {
         'friends': FieldValue.arrayUnion([senderId]),
         'friendRequests': FieldValue.arrayRemove([requestId]),
@@ -417,7 +506,10 @@ class ChatController extends GetxController {
       await batch.commit();
 
       // Get the sender's user data
-      final senderDoc = await _firestore.collection('users').doc(senderId).get();
+      final senderDoc = await _firestore
+          .collection('users')
+          .doc(senderId)
+          .get();
       if (senderDoc.exists) {
         final senderData = UserModel.fromMap({
           ...senderDoc.data()!,
@@ -435,7 +527,11 @@ class ChatController extends GetxController {
       common.showSnackbar('Success', 'Friend request accepted', Colors.green);
     } on FirebaseException catch (e) {
       _logger.e('Firebase error accepting friend request', error: e);
-      common.showSnackbar('Error', 'Failed to accept friend request', Colors.red);
+      common.showSnackbar(
+        'Error',
+        'Failed to accept friend request',
+        Colors.red,
+      );
     } catch (e) {
       _logger.e('Unexpected error accepting friend request', error: e);
       common.showSnackbar('Error', 'An unexpected error occurred', Colors.red);
@@ -451,27 +547,35 @@ class ChatController extends GetxController {
       final batch = _firestore.batch();
 
       // Update friend request status
-      final requestRef = _firestore.collection('friend_requests').doc(requestId);
+      final requestRef = _firestore
+          .collection('friend_requests')
+          .doc(requestId);
       batch.update(requestRef, {
         'status': 'rejected',
         'rejectedAt': FieldValue.serverTimestamp(),
       });
 
       // Remove from current user's friend requests
-      final currentUserRef = _firestore.collection('users').doc(currentUserId.value);
+      final currentUserRef = _firestore
+          .collection('users')
+          .doc(currentUserId.value);
       batch.update(currentUserRef, {
         'friendRequests': FieldValue.arrayRemove([requestId]),
       });
 
       await batch.commit();
-      
+
       // Reload friend requests
       await fetchFriendRequests();
-      
+
       common.showSnackbar('Info', 'Friend request rejected', Colors.blue);
     } on FirebaseException catch (e) {
       _logger.e('Firebase error rejecting friend request', error: e);
-      common.showSnackbar('Error', 'Failed to reject friend request', Colors.red);
+      common.showSnackbar(
+        'Error',
+        'Failed to reject friend request',
+        Colors.red,
+      );
     } catch (e) {
       _logger.e('Unexpected error rejecting friend request', error: e);
       common.showSnackbar('Error', 'An unexpected error occurred', Colors.red);
@@ -479,7 +583,6 @@ class ChatController extends GetxController {
       isLoading.value = false;
     }
   }
-
 
   // Send friend request
   Future<void> sendFriendRequest(String receiverEmail) async {
@@ -491,7 +594,7 @@ class ChatController extends GetxController {
     try {
       isLoading.value = true;
 
-      // Find user by email
+      // STEP 1: Find user by email FIRST
       final usersSnapshot = await _firestore
           .collection('users')
           .where('email', isEqualTo: receiverEmail.trim().toLowerCase())
@@ -500,19 +603,22 @@ class ChatController extends GetxController {
 
       if (usersSnapshot.docs.isEmpty) {
         common.showSnackbar('Error', 'User not found with this email', Colors.red);
-
         return;
       }
 
       final receiverId = usersSnapshot.docs.first.id;
 
-      // Don't allow sending request to self
+      // STEP 2: Don't allow sending request to self
       if (receiverId == currentUserId.value) {
-        common.showSnackbar('Error', 'You cannot send a friend request to yourself', Colors.red);
+        common.showSnackbar(
+          'Error',
+          'You cannot send a friend request to yourself',
+          Colors.red,
+        );
         return;
       }
 
-      // Check if already friends
+      // STEP 3: Check if already friends
       final userDoc = await _firestore
           .collection('users')
           .doc(currentUserId.value)
@@ -529,7 +635,7 @@ class ChatController extends GetxController {
         }
       }
 
-      // Check if request already exists
+      // STEP 4: Check if request already exists
       final existingRequest = await _firestore
           .collection('friend_requests')
           .where('senderId', isEqualTo: currentUserId.value)
@@ -543,7 +649,7 @@ class ChatController extends GetxController {
         return;
       }
 
-      // Create friend request
+      // STEP 5: Create friend request (SIRF EK BAAR)
       final requestRef = await _firestore.collection('friend_requests').add({
         'senderId': currentUserId.value,
         'receiverId': receiverId,
@@ -554,21 +660,42 @@ class ChatController extends GetxController {
         'timestamp': FieldValue.serverTimestamp(),
       });
 
-      // Add request to receiver's friend requests list
+      // STEP 6: Add request to receiver's friend requests list
       await _firestore.collection('users').doc(receiverId).update({
         'friendRequests': FieldValue.arrayUnion([requestRef.id]),
       });
+
+      // STEP 7: Send notification (YE OPTIONAL HAI - AGAR API SERVICE AVAILABLE HAI)
+      try {
+        await ApiNotificationService.sendFriendRequestNotification(
+          receiverId: receiverId,
+          senderId: currentUserId.value,
+          senderName: currentUser.value?.name ?? 'Unknown User',
+          senderEmail: currentUser.value?.email ?? '',
+        );
+        _logger.i('✅ Friend request notification sent successfully');
+      } catch (notificationError) {
+        _logger.w('⚠️ Failed to send notification: $notificationError');
+        // Don't fail the whole operation if notification fails
+      }
+
+      // STEP 8: Update UI and show success
       highlightedUserId.value = receiverId;
-   common.showSnackbar('Success', 'Friend request sent!', Colors.green);
+      common.showSnackbar('Success', 'Friend request sent!', Colors.green);
       emailController.clear();
+
     } on FirebaseException catch (e) {
       _logger.e('Firebase error sending friend request', error: e);
-      common.showSnackbar('Error', 'Failed to send friend request: ${e.message}', Colors.red);
-
+      common.showSnackbar(
+        'Error',
+        'Failed to send friend request: ${e.message}',
+        Colors.red,
+      );
     } catch (e) {
       _logger.e('Unexpected error sending friend request', error: e);
       common.showSnackbar('Error', 'An unexpected error occurred', Colors.red);
-      return;
+    } finally {
+      isLoading.value = false;
     }
   }
 
@@ -604,13 +731,18 @@ class ChatController extends GetxController {
 
       // Fetch and log receiver FCM-related info before sending notification
       try {
-        final receiverDoc = await _firestore.collection('users').doc(receiverId).get();
+        final receiverDoc = await _firestore
+            .collection('users')
+            .doc(receiverId)
+            .get();
         if (!receiverDoc.exists) {
           _logger.w('⚠️ Receiver user not found in Firestore: $receiverId');
         } else {
           final data = receiverDoc.data() ?? {};
           final rawToken = (data['fcmToken']?.toString() ?? '');
-          final tokenPreview = rawToken.isEmpty ? 'null' : '${rawToken.substring(0, rawToken.length.clamp(0, 12))}...';
+          final tokenPreview = rawToken.isEmpty
+              ? 'null'
+              : '${rawToken.substring(0, rawToken.length.clamp(0, 12))}...';
           _logger.i('👤 Receiver profile snapshot:');
           _logger.i('   • fcmToken: $tokenPreview');
           _logger.i('   • isOnline: ${data['isOnline'] ?? false}');
@@ -649,11 +781,16 @@ class ChatController extends GetxController {
         _logger.w('⚠️ Failed to enqueue notification: $e');
       }
 
-      _logger.i('💡 Message sent successfully: ${messageModel?.id ?? '(null-id)'}');
-
+      _logger.i(
+        '💡 Message sent successfully: ${messageModel?.id ?? '(null-id)'}',
+      );
     } on FirebaseException catch (e) {
       _logger.e('Firebase error sending message to user', error: e);
-      common.showSnackbar('Error', 'Failed to send message: ${e.message}', Colors.red);
+      common.showSnackbar(
+        'Error',
+        'Failed to send message: ${e.message}',
+        Colors.red,
+      );
       rethrow;
     } catch (e) {
       _logger.e('Unexpected error sending message to user', error: e);
@@ -691,18 +828,6 @@ class ChatController extends GetxController {
     }
   }
 
-  // Clean up method
-  Future<void> cleanup() async {
-    isTyping.value = false;
-    if (peerId != null) {
-      await _updateTypingStatus(false);
-    }
-
-    for (var subscription in _subscriptions) {
-      await subscription.cancel();
-    }
-    _subscriptions.clear();
-  }
 
   // send a image to specific friend
   Future<void> uploadSmallImage(String userId) async {
@@ -718,6 +843,7 @@ class ChatController extends GetxController {
       'photoBase64': base64Image,
     });
   }
+
   Future<void> signOut() async {
     try {
       for (var sub in _subscriptions) {
@@ -744,7 +870,7 @@ class ChatController extends GetxController {
       searchController.clear();
       emailController.clear();
 
-      Get.offAll(()=> LoginPage());
+      Get.offAll(() => LoginPage());
 
       _logger.i('User signed out successfully');
     } catch (e) {
@@ -756,7 +882,12 @@ class ChatController extends GetxController {
       );
     }
   }
-  Future<void> sendVoiceMessage(String receiverId, String audioPath, int duration) async {
+
+  Future<void> sendVoiceMessage(
+    String receiverId,
+    String audioPath,
+    int duration,
+  ) async {
     try {
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser == null) return;
