@@ -1,12 +1,18 @@
 import 'dart:ui';
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../controller/chat_controller.dart';
 import '../models/message_model.dart';
 import '../models/enums.dart';
 import '../services/chat_services/chat_services.dart';
+import 'full_screen_image.dart';
+import '../view/full_screen_image_view.dart';
 import 'glass.dart';
 
 class ChatBubble extends StatelessWidget {
@@ -68,24 +74,28 @@ class ChatBubble extends StatelessWidget {
   }
 
   Widget _buildAvatar() {
+    final photoUrl = message.senderPhotoUrl;
+    final name = message.senderName;
+    final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
     return Container(
       margin: const EdgeInsets.only(right: 8, bottom: 2),
       child: CircleAvatar(
         radius: 16,
-        backgroundColor: Colors.grey[300],
-        backgroundImage: message.senderPhotoUrl != null && message.senderPhotoUrl!.isNotEmpty
-            ? NetworkImage(message.senderPhotoUrl!)
-            : null,
-        child: message.senderPhotoUrl == null || message.senderPhotoUrl!.isEmpty
-            ? Text(
-          message.senderName!.isNotEmpty ? message.senderName![0].toUpperCase() : '?',
-          style: const TextStyle(
-            color: Colors.black87,
-            fontWeight: FontWeight.bold,
-            fontSize: 14,
-          ),
-        )
-            : null,
+        backgroundColor: Colors.grey.shade300,
+        backgroundImage: hasPhoto ? NetworkImage(photoUrl) : null,
+
+        child: hasPhoto
+            ? null
+            : Text(
+                (name != null && name.isNotEmpty)
+                    ? name.substring(0, 1).toUpperCase()
+                    : '?',
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
       ),
     );
   }
@@ -133,11 +143,11 @@ class ChatBubble extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (!isMe && message.senderName!.isNotEmpty)
+                if (!isMe && (message.senderName?.isNotEmpty ?? false))
                   Container(
                     margin: const EdgeInsets.only(bottom: 4),
                     child: Text(
-                      message.senderName!,
+                      message.senderName ?? '',
                       style: GoogleFonts.poppins(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -179,12 +189,6 @@ class ChatBubble extends StatelessWidget {
         );
       case MessageType.image:
         return _buildImageMessage();
-      case MessageType.video:
-        return _buildVideoMessage();
-      case MessageType.audio:
-        return _buildAudioMessage();
-      case MessageType.file:
-        return _buildFileMessage();
       case MessageType.location:
         return _buildLocationMessage();
       default:
@@ -192,11 +196,60 @@ class ChatBubble extends StatelessWidget {
     }
   }
 
-  Widget _buildAudioMessage() => Container(); // implement your audio widget
 
-  Widget _buildImageMessage() => Container(); // implement image widget
-  Widget _buildVideoMessage() => Container(); // implement video widget
-  Widget _buildFileMessage() => Container(); // implement file widget
+  Widget _buildImageMessage() {
+    final isUrl = message.content.startsWith('http');
+    final double w = 150, h = 150;
+    if (isUrl) {
+      return GestureDetector(
+        onTap: () => Get.to(() => FullScreenImageView(imageUrl: message.content)),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: CachedNetworkImage(
+            imageUrl: message.content,
+            placeholder: (context, url) => Container(
+              width: w,
+              height: h,
+              decoration: BoxDecoration(color: Colors.grey.shade800, borderRadius: BorderRadius.circular(16)),
+              child: const Center(child: CircularProgressIndicator()),
+            ),
+            errorWidget: (context, url, error) => Container(
+              width: w,
+              height: h,
+              decoration: BoxDecoration(color: Colors.grey.shade700, borderRadius: BorderRadius.circular(16)),
+              child: const Icon(Icons.error, color: Colors.red),
+            ),
+            width: w,
+            height: h,
+            fit: BoxFit.cover,
+          ),
+        ),
+      );
+    } else {
+      // Assume base64
+      late final Uint8List bytes;
+      try {
+        bytes = base64Decode(message.content);
+      } catch (_) {
+        bytes = Uint8List(0);
+      }
+      return GestureDetector(
+        onTap: () => Get.to(() => FullScreenImage(base64Data: message.content)),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: bytes.isNotEmpty
+              ? Image.memory(bytes, width: w, height: h, fit: BoxFit.cover)
+              : Container(
+                  width: w,
+                  height: h,
+                  decoration: BoxDecoration(color: Colors.grey.shade700, borderRadius: BorderRadius.circular(16)),
+                  child: const Icon(Icons.error, color: Colors.red),
+                ),
+        ),
+      );
+    }
+  }
+
   Widget _buildLocationMessage() => Container(); // implement location widget
 
   Widget _buildTimeStamp() {
@@ -436,6 +489,7 @@ class ChatBubble extends StatelessWidget {
       );
     }
   }
+
 
   Future<void> _deleteMessage(BuildContext context, {required bool forEveryone}) async {
     // Confirm for everyone

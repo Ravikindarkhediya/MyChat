@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:ads_demo/view/login_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -929,4 +930,65 @@ class ChatController extends GetxController with WidgetsBindingObserver {
     }
     return '';
   }
+
+  Future<void> sendImageMessage(String receiverId, File imageFile) async {
+    if (receiverId.isEmpty || imageFile.path.isEmpty) {
+      common.showSnackbar('Error', 'Invalid image or receiver', Colors.red);
+      return;
+    }
+
+    if (currentUserId.value.isEmpty) {
+      common.showSnackbar('Error', 'User not authenticated', Colors.red);
+      return;
+    }
+
+    try {
+      isSendingMessage.value = true;
+
+      // Read image file and convert to base64 (same approach as voice messages)
+      final bytes = await imageFile.readAsBytes();
+      final base64Image = base64Encode(bytes);
+
+      // Prepare message model
+      final chatId = _chatService.getChatId(currentUserId.value, receiverId);
+      final message = MessageModel(
+        id: _chatService.generateMessageId(chatId),
+        chatId: chatId,
+        senderId: currentUserId.value,
+        receiverId: receiverId,
+        type: MessageType.image,
+        content: base64Image,
+        timestamp: DateTime.now(),
+        status: MessageStatus.sending,
+        metadata: {
+          'size': bytes.length,
+          'encoding': 'base64',
+        },
+      );
+
+      // Send message to Firestore
+      await _chatService.sendMessageModel(message);
+
+      // Add locally to UI
+      messages.add(message);
+      messages.refresh();
+      updateUserChats();
+
+      // Optionally, send notification
+      await ChatFirebaseManager().sendChatNotification(
+        receiverId: receiverId,
+        chatId: chatId,
+        message: '[Image]',
+        messageType: 'image',
+        senderName: currentUser.value?.name ?? 'Unknown',
+        senderId: currentUserId.value,
+      );
+    } catch (e, st) {
+      _logger.e('Failed to send image message (base64)', error: e, stackTrace: st);
+      common.showSnackbar('Error', 'Failed to send image', Colors.red);
+    } finally {
+      isSendingMessage.value = false;
+    }
+  }
+
 }

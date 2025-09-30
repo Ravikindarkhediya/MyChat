@@ -532,5 +532,29 @@ class ChatService {
       }
     });
   }
+// Generate unique message ID
+  String generateMessageId(String chatId) {
+    final docRef = _db.collection('chats').doc(chatId).collection('messages').doc();
+    return docRef.id;
+  }
+
+// Send using MessageModel
+  Future<MessageModel> sendMessageModel(MessageModel message) async {
+    final chatId = message.chatId;
+    final messageRef = _db.collection('chats').doc(chatId).collection('messages').doc(message.id);
+
+    await messageRef.set(message.toMap());
+
+    // Optionally update chat summary
+    await _db.collection('chats').doc(chatId).set({
+      'participants': [message.senderId, message.receiverId],
+      'lastMessage': message.content,
+      'lastMessageTime': FieldValue.serverTimestamp(),
+      'lastMessageSenderId': message.senderId,
+      'unreadCount_${message.receiverId}': FieldValue.increment(1),
+    }, SetOptions(merge: true));
+
+    return message;
+  }
 
 }

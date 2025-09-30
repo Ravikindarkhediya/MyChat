@@ -12,11 +12,13 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../controller/chat_controller.dart';
 import '../models/message_model.dart';
 import '../models/user_model.dart';
+import '../services/chat_services/image_picker_service.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/glass.dart';
 import '../widgets/message_input_widget.dart';
 import 'chat_screen_widgets/appbar_action.dart';
 import 'chat_screen_widgets/popup_widget.dart';
+import 'friend_profile_page.dart';
 import 'home_page.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -310,7 +312,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   Widget _buildMessageInput() {
     return Column(
       children: [
-        //  TYPING INDICATOR KO COLUMN MEIN ADD KARO
         _buildTypingIndicator(),
 
         MessageInputWidget(
@@ -324,10 +325,16 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               duration,
             );
           },
-          onCameraPressed: () {
-            print(_peerUser!.uid);
-            _chatController.uploadSmallImage(_peerUser!.uid);
+          onCameraPressed: () async {
+            if (_peerUser == null) return;
+
+            final imageFile = await ImagePickerService()
+                .showImageSourceDialog();
+            if (imageFile != null) {
+              _chatController.sendImageMessage(_peerUser!.uid, imageFile);
+            }
           },
+
           onTypingChanged: (isTyping) {
             _chatController.updateTypingStatus(_peerUser!.uid, isTyping);
           },
@@ -449,7 +456,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                       ),
                       child: CircleAvatar(
                         radius: 20,
-                        backgroundColor: Colors.grey[300],
+                        backgroundColor: Colors.grey.shade300,
                         backgroundImage: _peerUser?.photoUrl != null
                             ? CachedNetworkImageProvider(_peerUser!.photoUrl!)
                             : null,
@@ -469,57 +476,91 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _peerUser?.name ?? 'Loading...',
-                          style: GoogleFonts.poppins(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
+                    child: GestureDetector(
+                      onTap: () {
+                        print('🚀 Navigation button tapped');
+                        print(
+                          '🚀 _peerUser: ${_peerUser?.name} (${_peerUser?.uid})',
+                        );
+
+                        if (_peerUser != null) {
+                          print(
+                            '✅ Navigating with peerUser: ${_peerUser!.name}',
+                          );
+                          Get.to(
+                            () => const FriendProfilePage(),
+                            arguments: _peerUser,
+                          );
+                        } else {
+                          print(
+                            '❌ _peerUser is null, cannot navigate with user data',
+                          );
+                          // You can either show an error or navigate without arguments
+                          Get.snackbar(
+                            'Error',
+                            'User data not available',
+                            backgroundColor: Colors.red,
+                            colorText: Colors.white,
+                          );
+                        }
+                      },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _peerUser?.name ?? 'Loading...',
+                            style: GoogleFonts.poppins(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 2),
-                        // Live presence + last seen
-                        StreamBuilder<UserModel?>(
-                          stream: userService.getUserStream(widget.peerUser?.uid ?? ''),
-                          builder: (context, snapshot) {
-                            final user = snapshot.data ?? _peerUser;
-                            final isOnline = user?.isOnline == true;
-                            final lastSeen = user?.lastSeen;
-                            final subtitle = isOnline
-                                ? 'Online'
-                                : (lastSeen != null
-                                    ? 'last seen ${_formatLastSeen(lastSeen)}'
-                                    : 'Offline');
-                            return Row(
-                              children: [
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: isOnline
-                                        ? Colors.greenAccent
-                                        : Colors.grey[400],
+                          const SizedBox(height: 2),
+                          // Live presence + last seen
+                          StreamBuilder<UserModel?>(
+                            stream: userService.getUserStream(
+                              widget.peerUser?.uid ?? '',
+                            ),
+                            builder: (context, snapshot) {
+                              final user = snapshot.data ?? _peerUser;
+                              final isOnline = user?.isOnline == true;
+                              final lastSeen = user?.lastSeen;
+                              final subtitle = isOnline
+                                  ? 'Online'
+                                  : (lastSeen != null
+                                        ? 'last seen ${_formatLastSeen(lastSeen)}'
+                                        : 'Offline');
+                              return Row(
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: isOnline
+                                          ? Colors.greenAccent
+                                          : Colors.grey[400],
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  subtitle,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 12,
-                                    color: Colors.white.withOpacity(0.7),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      subtitle,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 12,
+                                        color: Colors.white.withOpacity(0.7),
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
                                   ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      ],
+                                ],
+                              );
+                            },
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -694,8 +735,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   Widget _buildTypingIndicator() {
     return Obx(() {
-      final isOtherUserTyping =
-          _chatController.typingUsers[_peerUser!.uid] ?? false;
+      final peerId = _peerUser?.uid;
+      if (peerId == null) return const SizedBox.shrink();
+      final isOtherUserTyping = _chatController.typingUsers[peerId] ?? false;
 
       if (!isOtherUserTyping) return const SizedBox.shrink();
 

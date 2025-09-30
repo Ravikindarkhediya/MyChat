@@ -11,19 +11,27 @@ class ImagePickerService {
 
   final ImagePicker _picker = ImagePicker();
 
-  Future<bool> _requestPermissions() async {
+  Future<bool> _requestCameraPermission() async {
     final cameraStatus = await Permission.camera.request();
-    final storageStatus = await Permission.storage.request();
+    return cameraStatus.isGranted;
+  }
 
-    return cameraStatus.isGranted && storageStatus.isGranted;
+  Future<bool> _requestGalleryPermission() async {
+    // iOS requires Photos permission; Android commonly doesn't require storage for system picker
+    if (Platform.isIOS) {
+      final photos = await Permission.photos.request();
+      return photos.isGranted;
+    }
+    // On Android, try without explicit permission; if your target API requires it, you can request here.
+    return true;
   }
 
   Future<File?> pickImageFromCamera() async {
     try {
-      if (!await _requestPermissions()) {
+      if (!await _requestCameraPermission()) {
         Get.snackbar(
           'Permission Required',
-          'Camera and storage permissions are required',
+          'Camera permission is required',
           backgroundColor: Colors.red.withOpacity(0.8),
           colorText: Colors.white,
         );
@@ -54,10 +62,10 @@ class ImagePickerService {
 
   Future<File?> pickImageFromGallery() async {
     try {
-      if (!await _requestPermissions()) {
+      if (!await _requestGalleryPermission()) {
         Get.snackbar(
           'Permission Required',
-          'Storage permission is required',
+          'Photos permission is required',
           backgroundColor: Colors.red.withOpacity(0.8),
           colorText: Colors.white,
         );
@@ -87,41 +95,43 @@ class ImagePickerService {
   }
 
   Future<File?> showImageSourceDialog() async {
-    return await Get.dialog<File?>(
-      AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: const Text(
-          'Select Image',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(Icons.camera_alt, color: Colors.blue),
-              title: Text('Camera', style: TextStyle(color: Colors.white)),
-              onTap: () async {
-                final image = await pickImageFromCamera();
-                Get.back(result: image);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: Colors.green),
-              title: const Text('Gallery', style: TextStyle(color: Colors.white)),
-              onTap: () async {
-                final image = await pickImageFromGallery();
-                Get.back(result: image);
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Get.back(),
-            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
-          ),
-        ],
+    final ctx = Get.context;
+    if (ctx == null) return null;
+
+    final String? choice = await showModalBottomSheet<String>(
+      context: ctx,
+      backgroundColor: Colors.grey[900],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Colors.blue),
+                title: const Text('Camera', style: TextStyle(color: Colors.white)),
+                onTap: () => Navigator.of(context).pop('camera'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library, color: Colors.green),
+                title: const Text('Gallery', style: TextStyle(color: Colors.white)),
+                onTap: () => Navigator.of(context).pop('gallery'),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
     );
+
+    if (choice == 'camera') {
+      return await pickImageFromCamera();
+    } else if (choice == 'gallery') {
+      return await pickImageFromGallery();
+    }
+    return null;
   }
 }
