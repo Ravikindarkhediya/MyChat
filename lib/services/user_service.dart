@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:get/get.dart';
 import 'package:logger/logger.dart';
 
 import '../models/user_model.dart';
@@ -326,6 +325,42 @@ class UserService {
       }
       return null;
     });
+  }
+// UserService class में यह method add करें
+  Future<void> debugChatMessages(String chatId) async {
+    try {
+      final chatDoc = await _firestore.collection('chats').doc(chatId).get();
+
+      if (chatDoc.exists) {
+        print('✅ Chat exists: $chatId');
+        print('Chat data: ${chatDoc.data()}');
+
+        final messagesQuery = await chatDoc.reference
+            .collection('messages')
+            .orderBy('timestamp', descending: true)
+            .limit(10)
+            .get();
+
+        print('📨 Recent messages count: ${messagesQuery.docs.length}');
+
+        for (var msgDoc in messagesQuery.docs) {
+          final data = msgDoc.data();
+          print('🔍 Message ${msgDoc.id}:');
+          print('   Type: ${data['type']}');
+          print('   Content length: ${(data['content'] ?? '').toString().length}');
+          print('   MediaUrl: ${data['mediaUrl']}');
+          print('   Has MediaUrl: ${data['mediaUrl'] != null}');
+
+          if (data['type'] == 'image') {
+            print('   ✅ This is an IMAGE MESSAGE!');
+          }
+        }
+      } else {
+        print('❌ Chat does not exist: $chatId');
+      }
+    } catch (e) {
+      print('❌ Debug error: $e');
+    }
   }
 
 }

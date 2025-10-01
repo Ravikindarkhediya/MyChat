@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart' as firebase_storage;
 
 import '../models/user_model.dart';
 import '../services/calling_service.dart';
@@ -47,6 +48,78 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
         );
       }
     }
+
+    // Fix data:image parsing
+    if (source.startsWith('data:image')) {
+      try {
+        final uri = Uri.parse(source);
+        final bytes = uri.data?.contentAsBytes();
+        if (bytes != null) {
+          return Image.memory(bytes, fit: BoxFit.cover);
+        }
+      } catch (_) {
+        return Container(
+          color: Colors.white.withOpacity(0.1),
+          child: const Icon(Icons.broken_image, color: Colors.white54),
+        );
+      }
+    }
+
+    // Plain base64 fallback (no prefix) - try decoding if it looks like base64 and not a URL
+    final looksLikeUrl = source.startsWith('http://') || source.startsWith('https://') || source.startsWith('gs://');
+    final looksLikeBase64 = !looksLikeUrl && source.length > 100 && RegExp(r'^[A-Za-z0-9+/=\r\n]+\$?').hasMatch(source.substring(0, source.length.clamp(0, 256)));
+    if (looksLikeBase64) {
+      try {
+        final bytes = base64Decode(source);
+        return Image.memory(bytes, fit: BoxFit.cover);
+      } catch (_) {
+        // fall through to next handlers
+      }
+    }
+
+    // Handle Firebase Storage gs:// URLs
+    if (source.startsWith('gs://')) {
+      return FutureBuilder<String?>(
+        future: _resolveGsUrl(source),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Container(
+              color: Colors.white.withOpacity(0.1),
+              child: const Center(
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ),
+            );
+          }
+          final url = snapshot.data;
+          if (url == null || snapshot.hasError) {
+            print('❌ Failed to resolve gs:// URL: $source, Error: ${snapshot.error}');
+            return Container(
+              color: Colors.white.withOpacity(0.1),
+              child: const Icon(Icons.broken_image, color: Colors.white54),
+            );
+          }
+          return CachedNetworkImage(
+            imageUrl: url,
+            fit: BoxFit.cover,
+            placeholder: (context, u) => Container(
+              color: Colors.white.withOpacity(0.1),
+              child: const Center(
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ),
+            ),
+            errorWidget: (context, u, error) {
+              print('❌ CachedNetworkImage error for $url: $error');
+              return Container(
+                color: Colors.white.withOpacity(0.1),
+                child: const Icon(Icons.broken_image, color: Colors.white54),
+              );
+            },
+          );
+        },
+      );
+    }
+
+    // Regular HTTP/HTTPS URLs
     return CachedNetworkImage(
       imageUrl: source,
       fit: BoxFit.cover,
@@ -56,11 +129,25 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
         ),
       ),
-      errorWidget: (context, url, error) => Container(
-        color: Colors.white.withOpacity(0.1),
-        child: const Icon(Icons.broken_image, color: Colors.white54),
-      ),
+      errorWidget: (context, url, error) {
+        print('❌ CachedNetworkImage error for $url: $error');
+        return Container(
+          color: Colors.white.withOpacity(0.1),
+          child: const Icon(Icons.broken_image, color: Colors.white54),
+        );
+      },
     );
+  }
+
+  Future<String?> _resolveGsUrl(String gsUrl) async {
+    try {
+      final ref = firebase_storage.FirebaseStorage.instance.refFromURL(gsUrl);
+      return await ref.getDownloadURL();
+    } catch (e) {
+      // keep logs minimal
+      debugPrint('Failed to resolve gs url: $e');
+      return null;
+    }
   }
 
   @override
@@ -90,36 +177,35 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
     setState(() {
       peerUser = user;
     });
-    print('✅ Peer user set: ${user.name} (UID: ${user.uid})');
     _loadSharedMedia();
   }
 
   Future<void> _loadSharedMedia() async {
-    // Ensure we have current user id (retry once)
     currentUserId ??= userService.currentUserId ?? FirebaseAuth.instance.currentUser?.uid;
 
     if (peerUser?.uid == null || currentUserId == null) {
-      print('❌ Cannot load media: missing user data');
-      setState(() {
-        isLoading = false;
-      });
+      setState(() => isLoading = false);
       return;
     }
 
-    setState(() {
-      isLoading = true;
-    });
+    setState(() => isLoading = true);
 
     final images = <String>[];
 
     try {
       final peerUserId = peerUser!.uid;
 
-      print('🔍 Loading shared media between:');
-      print('   Current User: $currentUserId');
-      print('   Peer User: $peerUserId');
+      // First try to see what chats exist
+      final allChats = await FirebaseFirestore.instance
+          .collection('chats')
+          .get();
 
-      // Try multiple approaches
+      print('📱 Total chats in database: ${allChats.docs.length}');
+      for (var chat in allChats.docs.take(5)) {
+        print('   Chat ID: ${chat.id}, Data: ${chat.data()}');
+      }
+
+      // Try all methods
       await _method1DirectChatId(currentUserId!, peerUserId, images);
 
       if (images.isEmpty) {
@@ -130,41 +216,80 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
         await _method3AllMessages(currentUserId!, peerUserId, images);
       }
 
-      // Normalize and filter valid URLs and remove duplicates
-      final validImages = images
-          .where((url) => url.isNotEmpty && (url.startsWith('http://') || url.startsWith('https://')))
+      // Enhanced filtering (include plain base64 without prefix)
+      bool _looksLikeBase64(String s) {
+        if (s.isEmpty) return false;
+        if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('gs://') || s.startsWith('data:image') || s.startsWith('base64:')) {
+          return false;
+        }
+        if (s.length < 100) return false;
+        final head = s.substring(0, s.length.clamp(0, 256));
+        return RegExp(r'^[A-Za-z0-9+/=\r\n]+\$?').hasMatch(head);
+      }
+
+      var validImages = images
+          .where((url) => url.isNotEmpty && (
+              url.startsWith('http://') ||
+              url.startsWith('https://') ||
+              url.startsWith('gs://') ||
+              url.startsWith('base64:') ||
+              url.startsWith('data:image') ||
+              _looksLikeBase64(url)
+          ))
           .toSet()
           .toList();
+      print('🧮 Images found before exclusion: ${validImages.length}');
+
+      // Exclude known profile/banner URLs (and their resolved https versions) so they don't show as shared media
+      final excludeCandidates = <String?>[
+        peerUser?.photoUrl,
+        peerUser?.bannerUrl,
+        FirebaseAuth.instance.currentUser?.photoURL,
+      ];
+      final excludeSet = <String>{};
+      for (final u in excludeCandidates) {
+        if (u == null || u.isEmpty) continue;
+        excludeSet.add(u);
+        if (u.startsWith('gs://')) {
+          final resolved = await _resolveGsUrl(u);
+          if (resolved != null && resolved.isNotEmpty) excludeSet.add(resolved);
+        }
+      }
+
+      final afterExclusion = validImages.where((u) => !excludeSet.contains(u)).toList();
+      print('🧮 Images after exclusion: ${afterExclusion.length} (excluded: ${validImages.length - afterExclusion.length})');
+
+      // Fallback: if exclusion removed everything but we had some items, keep the pre-exclusion list
+      if (afterExclusion.isEmpty && validImages.isNotEmpty) {
+        print('⚠️ Exclusion removed all images; using pre-exclusion list to ensure UI shows media.');
+      } else {
+        validImages = afterExclusion;
+      }
 
       setState(() {
         sharedImages = validImages;
         isLoading = false;
       });
 
-      print('############ shared Images : ${sharedImages.length}');
+      print('Total valid images found: ${validImages.length}');
 
       if (validImages.isNotEmpty) {
         print('✅ Sample images:');
-        validImages.take(3).forEach((url) => print('   $url'));
-      } else {
-        print('❌ No valid images found');
+        validImages.take(3).forEach((url) => print('   ${url.substring(0, url.length > 100 ? 100 : url.length)}...'));
       }
 
-    } catch (e, stackTrace) {
+    } catch (e) {
       print('❌ Error loading shared media: $e');
-      print('Stack trace: $stackTrace');
-      setState(() {
-        isLoading = false;
-      });
+      setState(() => isLoading = false);
     }
   }
 
-  // Method 1: Direct chat ID approach
   Future<void> _method1DirectChatId(String currentUserId, String peerUserId, List<String> images) async {
     try {
       final sortedIds = [currentUserId, peerUserId]..sort();
       final sortedChatId = sortedIds.join('_');
 
+      // Try different chat ID variations
       final chatIds = [
         '${currentUserId}_${peerUserId}',
         '${peerUserId}_${currentUserId}',
@@ -174,6 +299,8 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
       for (String chatId in chatIds) {
         print('🔍 Trying chat ID: $chatId');
 
+        await userService.debugChatMessages(chatId);
+
         final chatDoc = await FirebaseFirestore.instance
             .collection('chats')
             .doc(chatId)
@@ -181,30 +308,43 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
 
         if (chatDoc.exists) {
           print('✅ Found chat document: $chatId');
+          print('Chat data: ${chatDoc.data()}');
 
+          // Get messages with broader query
           final messagesQuery = await chatDoc.reference
               .collection('messages')
               .orderBy('timestamp', descending: true)
-              .limit(500)
+              .limit(1000)
               .get();
 
           print('📨 Messages found: ${messagesQuery.docs.length}');
 
+          int imageCount = 0;
           for (var msgDoc in messagesQuery.docs) {
             final data = msgDoc.data();
+            print('Message data: $data');
+
             final urls = _extractAllImageUrls(data);
             if (urls.isNotEmpty) {
               images.addAll(urls);
+              imageCount += urls.length;
+              print('✅ Added ${urls.length} images from message ${msgDoc.id}');
             }
           }
 
-          if (images.isNotEmpty) break;
+          print('🎯 Total images found in chat $chatId: $imageCount');
+
+          if (images.isNotEmpty) {
+            print('✅ Breaking early, found images');
+            break;
+          }
         } else {
           print('❌ Chat document not found: $chatId');
         }
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
       print('❌ Method 1 error: $e');
+      print('Stack trace: $stackTrace');
     }
   }
 
@@ -282,59 +422,93 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
     }
   }
 
-  // Helper: extract all possible image URLs from message data
   List<String> _extractAllImageUrls(Map<String, dynamic> data) {
     final results = <String>[];
 
-    bool _isValidUrl(dynamic v) => v is String && v.isNotEmpty &&
-        (v.startsWith('http://') || v.startsWith('https://'));
+    print('🔍 Analyzing message data: $data');
 
-    // Common direct string fields
-    for (final key in const [
-      'imageUrl', 'image', 'photoUrl', 'content', 'url', 'file_url', 'attachment_url'
-    ]) {
-      final v = data[key];
-      if (_isValidUrl(v)) results.add(v as String);
-    }
+    // Helper methods
+    bool _isValidUrl(dynamic v) => v is String &&
+        v.isNotEmpty &&
+        (v.startsWith('http://') ||
+            v.startsWith('https://') ||
+            v.startsWith('gs://') ||
+            v.startsWith('data:image'));
 
-    // Message field could be string or map with url
-    final msg = data['message'];
-    if (_isValidUrl(msg)) results.add(msg as String);
-    if (msg is Map) {
-      for (final k in ['url', 'imageUrl', 'photoUrl']) {
-        final v = msg[k];
-        if (_isValidUrl(v)) results.add(v as String);
+    bool _isBase64Image(dynamic v) {
+      if (v is! String || v.isEmpty) return false;
+
+      // Data URL format (data:image/jpeg;base64,...)
+      if (v.startsWith('data:image') && v.contains('base64,')) {
+        return true;
       }
+
+      // Base64 prefix format (base64:...)
+      if (v.startsWith('base64:')) return true;
+
+      // Plain base64 heuristic
+      if (v.startsWith('http://') || v.startsWith('https://') || v.startsWith('gs://')) {
+        return false;
+      }
+      if (v.length < 100) return false;
+
+      final head = v.substring(0, v.length.clamp(0, 256));
+      return RegExp(r'^[A-Za-z0-9+/=\r\n]+$').hasMatch(head);
     }
 
-    // If message type is image and content likely base64, capture it
+    // Get message type
     final type = (data['type'] ?? '').toString().toLowerCase();
-    final content = data['content'];
-    if (type.contains('image') && content is String && content.isNotEmpty && !content.startsWith('http')) {
-      // Heuristic: base64 strings are usually long and only base64 chars
-      final isBase64 = RegExp(r'^[A-Za-z0-9+/=\s]+$').hasMatch(content) && content.length > 100;
-      if (isBase64) {
-        results.add('base64:' + content);
+    print('📝 Message type: $type');
+
+    // 1. ✅ Priority check - mediaUrl field (most important for your case)
+    if (data['mediaUrl'] != null) {
+      final mediaUrl = data['mediaUrl'] as String;
+      if (_isValidUrl(mediaUrl) || _isBase64Image(mediaUrl)) {
+        results.add(mediaUrl);
+        print('✅ Found image in mediaUrl: ${mediaUrl.length > 50 ? "${mediaUrl.substring(0, 50)}..." : mediaUrl}');
       }
     }
 
-    // Attachments: list of maps/strings
-    for (final listKey in const ['attachments', 'files', 'media']) {
-      final list = data[listKey];
-      if (list is List) {
-        for (final item in list) {
-          if (_isValidUrl(item)) results.add(item as String);
-          if (item is Map) {
-            for (final k in ['url', 'imageUrl', 'photoUrl', 'file_url', 'path']) {
-              final v = item[k];
-              if (_isValidUrl(v)) results.add(v as String);
-            }
+    // 2. ✅ Check if this is an image message type
+    if (type == 'image' || type == 'photo' || type == 'media') {
+
+      // Check content field for base64 images
+      if (data['content'] != null) {
+        final content = data['content'] as String;
+        if (_isBase64Image(content)) {
+          results.add(content);
+          print('✅ Found base64 image in content field');
+        }
+      }
+
+      // Check other common image fields
+      final imageFields = [
+        'imageUrl', 'image', 'url', 'src', 'downloadUrl',
+        'attachment_url', 'file_url', 'photo', 'picture'
+      ];
+
+      for (final field in imageFields) {
+        if (data[field] != null) {
+          final value = data[field] as String;
+          if (_isValidUrl(value) || _isBase64Image(value)) {
+            results.add(value);
+            print('✅ Found image in $field');
           }
         }
       }
     }
 
-    return results;
+    // 3. ✅ Skip profile/sender images
+    final excludeFields = ['senderPhotoUrl', 'receiverPhotoUrl', 'userPhotoUrl'];
+    for (final field in excludeFields) {
+      if (data[field] != null) {
+        final value = data[field] as String;
+        print('⏭️ Skipping profile image at $field');
+      }
+    }
+
+    print('🎯 Total images found in this message: ${results.length}');
+    return results.toSet().toList();
   }
 
   void _openFullScreenGrid() {
@@ -367,6 +541,65 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
           ),
         ),
       );
+    } else if (src.startsWith('data:image')) {
+      final comma = src.indexOf(',');
+      if (comma != -1) {
+        final b64 = src.substring(comma + 1);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => Scaffold(
+              backgroundColor: Colors.black,
+              appBar: AppBar(backgroundColor: Colors.transparent),
+              body: Center(
+                child: Image.memory(base64Decode(b64), fit: BoxFit.contain),
+              ),
+            ),
+          ),
+        );
+      }
+    } else if (!(src.startsWith('http://') || src.startsWith('https://') || src.startsWith('gs://'))) {
+      // Try plain base64 for viewer
+      try {
+        final bytes = base64Decode(src);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => Scaffold(
+              backgroundColor: Colors.black,
+              appBar: AppBar(backgroundColor: Colors.transparent),
+              body: Center(
+                child: Image.memory(bytes, fit: BoxFit.contain),
+              ),
+            ),
+          ),
+        );
+        return;
+      } catch (_) {
+        // not base64, fall through
+      }
+    } else if (src.startsWith('gs://')) {
+      // Resolve and then open
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
+      _resolveGsUrl(src).then((url) {
+        Navigator.of(context).pop(); // close loader
+        if (url != null) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => FullScreenImage(url: url),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Unable to load image')),
+          );
+        }
+      });
     } else {
       Navigator.push(
         context,
@@ -392,19 +625,19 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
         ),
         child: peerUser == null
             ? const Center(
-          child: CircularProgressIndicator(color: Colors.white),
-        )
+                child: CircularProgressIndicator(color: Colors.white),
+              )
             : SingleChildScrollView(
-          child: Column(
-            children: [
-              _buildProfileHeader(),
-              SizedBox(height: MediaQuery.of(context).size.height * 0.08),
-              _buildUserInfo(),
-              const SizedBox(height: 24),
-              _buildSharedMedia(),
-            ],
-          ),
-        ),
+                child: Column(
+                  children: [
+                    _buildProfileHeader(),
+                    SizedBox(height: MediaQuery.of(context).size.height * 0.08),
+                    _buildUserInfo(),
+                    const SizedBox(height: 24),
+                    _buildSharedMedia(),
+                  ],
+                ),
+              ),
       ),
     );
   }
@@ -424,29 +657,68 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
               ],
             ),
           ),
-          child: peerUser?.bannerUrl != null
-              ? CachedNetworkImage(
-            imageUrl: peerUser!.bannerUrl!,
-            fit: BoxFit.cover,
-            placeholder: (context, url) =>
-                Container(color: Colors.white.withOpacity(0.1)),
-            errorWidget: (context, url, error) => Container(
-              color: Colors.white.withOpacity(0.1),
-              child: Icon(
-                Icons.broken_image_outlined,
-                size: 64,
-                color: Colors.white.withOpacity(0.3),
+          child: () {
+            final bannerUrl = peerUser?.bannerUrl;
+            if (bannerUrl == null || bannerUrl.isEmpty) {
+              return Container(
+                color: Colors.white.withOpacity(0.1),
+                child: Icon(
+                  Icons.image_outlined,
+                  size: 64,
+                  color: Colors.white.withOpacity(0.3),
+                ),
+              );
+            }
+            if (bannerUrl.startsWith('gs://')) {
+              return FutureBuilder<String?>(
+                future: _resolveGsUrl(bannerUrl),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return Container(color: Colors.white.withOpacity(0.1));
+                  }
+                  final url = snapshot.data;
+                  if (url == null) {
+                    return Container(
+                      color: Colors.white.withOpacity(0.1),
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        size: 64,
+                        color: Colors.white.withOpacity(0.3),
+                      ),
+                    );
+                  }
+                  return CachedNetworkImage(
+                    imageUrl: url,
+                    fit: BoxFit.cover,
+                    placeholder: (context, _) =>
+                        Container(color: Colors.white.withOpacity(0.1)),
+                    errorWidget: (context, _, __) => Container(
+                      color: Colors.white.withOpacity(0.1),
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        size: 64,
+                        color: Colors.white.withOpacity(0.3),
+                      ),
+                    ),
+                  );
+                },
+              );
+            }
+            return CachedNetworkImage(
+              imageUrl: bannerUrl,
+              fit: BoxFit.cover,
+              placeholder: (context, url) =>
+                  Container(color: Colors.white.withOpacity(0.1)),
+              errorWidget: (context, url, error) => Container(
+                color: Colors.white.withOpacity(0.1),
+                child: Icon(
+                  Icons.broken_image_outlined,
+                  size: 64,
+                  color: Colors.white.withOpacity(0.3),
+                ),
               ),
-            ),
-          )
-              : Container(
-            color: Colors.white.withOpacity(0.1),
-            child: Icon(
-              Icons.image_outlined,
-              size: 64,
-              color: Colors.white.withOpacity(0.3),
-            ),
-          ),
+            );
+          }(),
         ),
         Positioned(
           bottom: -50,
@@ -466,23 +738,62 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
                     ],
                   ),
                 ),
-                child: CircleAvatar(
-                  radius: 60,
-                  backgroundColor: Colors.grey[300],
-                  backgroundImage: peerUser?.photoUrl != null
-                      ? CachedNetworkImageProvider(peerUser!.photoUrl!)
-                      : null,
-                  child: peerUser?.photoUrl == null
-                      ? Text(
-                    peerUser?.name[0].toUpperCase() ?? '?',
-                    style: const TextStyle(
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  )
-                      : null,
-                ),
+                child: () {
+                  final photoUrl = peerUser?.photoUrl;
+                  if (photoUrl == null || photoUrl.isEmpty) {
+                    return CircleAvatar(
+                      radius: 60,
+                      backgroundColor: Colors.grey[300],
+                      child: Text(
+                        peerUser?.name[0].toUpperCase() ?? '?',
+                        style: const TextStyle(
+                          fontSize: 48,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    );
+                  }
+                  if (photoUrl.startsWith('gs://')) {
+                    return FutureBuilder<String?>(
+                      future: _resolveGsUrl(photoUrl),
+                      builder: (context, snapshot) {
+                        final url = snapshot.data;
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return CircleAvatar(
+                            radius: 60,
+                            backgroundColor: Colors.grey[300],
+                            child: const CircularProgressIndicator(strokeWidth: 2),
+                          );
+                        }
+                        if (url == null) {
+                          return CircleAvatar(
+                            radius: 60,
+                            backgroundColor: Colors.grey[300],
+                            child: Text(
+                              peerUser?.name[0].toUpperCase() ?? '?',
+                              style: const TextStyle(
+                                fontSize: 48,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
+                              ),
+                            ),
+                          );
+                        }
+                        return CircleAvatar(
+                          radius: 60,
+                          backgroundColor: Colors.grey[300],
+                          backgroundImage: CachedNetworkImageProvider(url),
+                        );
+                      },
+                    );
+                  }
+                  return CircleAvatar(
+                    radius: 60,
+                    backgroundColor: Colors.grey[300],
+                    backgroundImage: CachedNetworkImageProvider(photoUrl),
+                  );
+                }(),
               ),
             ),
           ),
@@ -573,7 +884,6 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
         ),
       );
     }
-
     return GlassContainer(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(16),

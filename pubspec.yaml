@@ -82,7 +82,8 @@ dependencies:
   jitsi_meet_flutter_sdk: 11.4.0
   # Emoji Picker
   emoji_picker_flutter: ^4.3.0
-  
+  cached_memory_image: ^1.5.0
+
   # Audio/Video
   just_audio: ^0.10.5
   video_player: ^2.8.1

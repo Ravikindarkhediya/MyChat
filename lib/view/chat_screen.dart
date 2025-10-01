@@ -12,7 +12,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../controller/chat_controller.dart';
 import '../models/message_model.dart';
 import '../models/user_model.dart';
-import '../services/chat_services/image_picker_service.dart';
+import '../services/chat_services/image_service.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/glass.dart';
 import '../widgets/message_input_widget.dart';
@@ -328,7 +328,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           onCameraPressed: () async {
             if (_peerUser == null) return;
 
-            final imageFile = await ImagePickerService()
+            final imageFile = await ImageService()
                 .showImageSourceDialog();
             if (imageFile != null) {
               _chatController.sendImageMessage(_peerUser!.uid, imageFile);
@@ -592,6 +592,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                       case 'mute':
                         // TODO: Implement mute notifications
                         break;
+
                       case 'clear_chat':
                         final success = await _chatService
                             .softDeleteChatForUser(

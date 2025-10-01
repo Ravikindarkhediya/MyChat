@@ -354,8 +354,10 @@ class ChatService {
       final chatRef = _db.collection('chats').doc(chatId);
       final messagesRef = chatRef.collection('messages');
 
+      // Batch operation start करें
       final batch = _db.batch();
 
+      // सभी messages को soft delete करें
       final messagesSnapshot = await messagesRef.get();
       for (var doc in messagesSnapshot.docs) {
         batch.update(doc.reference, {
@@ -363,11 +365,15 @@ class ChatService {
         });
       }
 
+      // Chat document को भी soft delete करें
       batch.update(chatRef, {
         'deletedFor': FieldValue.arrayUnion([currentUserId]),
+        'lastMessageDeletedFor': FieldValue.arrayUnion([currentUserId]),
       });
 
       await batch.commit();
+
+      print('✅ Chat successfully soft deleted for user: $currentUserId');
 
       Common().showSnackbar(
         'Success',
@@ -377,55 +383,13 @@ class ChatService {
 
       return true;
     } catch (e) {
+      print('❌ Error in soft delete: $e');
       Common().showSnackbar(
         'Error',
         'Failed to clear chat: $e',
         Colors.red,
       );
       return false;
-    }
-  }
-
-  Future<List<UserModel>> searchUsers(String query, {String? excludeUserId}) async {
-    if (query.isEmpty) return [];
-
-    try {
-      final queryLower = query.toLowerCase();
-
-      final nameQuery = _db
-          .collection('users')
-          .where('searchTerms', arrayContains: queryLower);
-
-      final emailQuery = _db
-          .collection('users')
-          .where('email', isGreaterThanOrEqualTo: queryLower)
-          .where('email', isLessThanOrEqualTo: queryLower + '\uf8ff');
-
-      final [nameResults, emailResults] = await Future.wait([
-        nameQuery.get(),
-        emailQuery.get(),
-      ]);
-
-      final allResults = <String, UserModel>{};
-
-      void addResults(QuerySnapshot snapshot) {
-        for (var doc in snapshot.docs) {
-          if (excludeUserId == null || doc.id != excludeUserId) {
-            allResults[doc.id] = UserModel.fromMap({
-              ...doc.data() as Map<String, dynamic>,
-              'uid': doc.id,
-            });
-          }
-        }
-      }
-
-      addResults(nameResults);
-      addResults(emailResults);
-
-      return allResults.values.toList();
-    } on FirebaseException catch (e) {
-      Get.log('Error searching users: ${e.message}');
-      return [];
     }
   }
 
@@ -556,5 +520,29 @@ class ChatService {
 
     return message;
   }
+  Stream<List<MessageModel>> getChatMessages({
+    required String currentUserId,
+    required String friendUserId,
+  }) {
+    final chatId = getChatId(currentUserId, friendUserId);
 
+    return _db
+        .collection('chats')
+        .doc(chatId)
+        .collection('messages')
+        .where('deletedFor', whereNotIn: [
+      [currentUserId], // User के लिए delete नहीं हुआ
+      // Multiple combinations भी handle करें
+    ])
+        .orderBy('timestamp', descending: false)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+        .where((doc) {
+      final data = doc.data();
+      final deletedFor = List<String>.from(data['deletedFor'] ?? []);
+      return !deletedFor.contains(currentUserId);
+    })
+        .map((doc) =>  MessageModel.fromMap(doc.data()))
+        .toList());
+  }
 }

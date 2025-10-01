@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:cached_memory_image/cached_memory_image.dart';
 
 class SharedMediaGridView extends StatelessWidget {
   final List<String> images;
@@ -67,46 +68,74 @@ class SharedMediaGridView extends StatelessWidget {
               mainAxisSpacing: 8,
             ),
             itemCount: images.length,
-            itemBuilder: (context, index) {
-              return GestureDetector(
-                onTap: () => onImageTap(index),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.white.withOpacity(0.2),
-                      width: 1,
+              itemBuilder: (context, index) {
+                print('^^^^^^^^ ${images[index]}');
+
+                return GestureDetector(
+                  onTap: () => onImageTap(index),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.2),
+                        width: 1,
+                      ),
                     ),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: CachedNetworkImage(
-                      imageUrl: images[index],
-                      fit: BoxFit.cover,
-                      placeholder: (context, url) => Container(
-                        color: Colors.white.withOpacity(0.1),
-                        child: const Center(
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: images[index].startsWith('data:image')
+                          ? CachedMemoryImage(
+                        uniqueKey: 'image_$index',
+                        base64: _extractBase64(images[index]),
+                        fit: BoxFit.cover,
+                        placeholder: Container(
+                          color: Colors.white.withOpacity(0.1),
+                          child: const Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        errorWidget: Container(
+                          color: Colors.white.withOpacity(0.1),
+                          child: const Icon(
+                            Icons.broken_image,
+                            color: Colors.white54,
+                          ),
+                        ),
+                      )
+                          : CachedNetworkImage(
+                        imageUrl: images[index],
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) => Container(
+                          color: Colors.white.withOpacity(0.1),
+                          child: const Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        errorWidget: (context, url, error) => Container(
+                          color: Colors.white.withOpacity(0.1),
+                          child: const Icon(
+                            Icons.broken_image,
+                            color: Colors.white54,
                           ),
                         ),
                       ),
-                      errorWidget: (context, url, error) => Container(
-                        color: Colors.white.withOpacity(0.1),
-                        child: const Icon(
-                          Icons.broken_image,
-                          color: Colors.white54,
-                        ),
-                      ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              }
           ),
         ),
       ),
     );
+  }
+
+  String _extractBase64(String dataUrl) {
+    return dataUrl.split(',')[1];
   }
 }

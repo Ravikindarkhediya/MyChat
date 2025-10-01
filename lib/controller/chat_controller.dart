@@ -227,20 +227,6 @@ class ChatController extends GetxController with WidgetsBindingObserver {
       _listenToUserChats();
     }
 
-    // Step 3: Setup search listener
-    _searchListener = () {
-      final query = searchController.text.trim();
-      if (query.length >= 2) {
-        searchUsers(query);
-      } else {
-        searchResults.clear();
-      }
-    };
-    searchController.addListener(_searchListener);
-
-    // Step 4: Typing listener
-    // messageController.addListener(_onTypingChanged);
-
     // Step 5: Resubscribe chats when currentUserId changes later
     ever<String>(currentUserId, (id) {
       if (id.isNotEmpty) {
@@ -248,27 +234,6 @@ class ChatController extends GetxController with WidgetsBindingObserver {
       }
     });
   }
-
-  // void _onTypingChanged() {
-  //   if (peerId == null) return;
-  //
-  //   final isCurrentlyTyping = messageController.text.trim().isNotEmpty;
-  //   if (isTyping.value != isCurrentlyTyping) {
-  //     isTyping.value = isCurrentlyTyping;
-  //     _updateTypingStatus(isCurrentlyTyping);
-  //   }
-  //
-  //   // Reset typing after 3 seconds of inactivity
-  //   _typingTimer?.cancel();
-  //   if (isCurrentlyTyping) {
-  //     _typingTimer = Timer(const Duration(seconds: 3), () {
-  //       if (isTyping.value) {
-  //         isTyping.value = false;
-  //         _updateTypingStatus(false);
-  //       }
-  //     });
-  //   }
-  // }
 
   void clearChatMessages(String friendUserId) {
     if (friendUserId.isEmpty) return;
@@ -290,6 +255,7 @@ class ChatController extends GetxController with WidgetsBindingObserver {
       userChats.refresh();
     }
   }
+
 
   Future<void> updateTypingStatus(String peerId, bool isTyping) async {
     if (peerId.isEmpty || currentUserId.value.isEmpty) return;
@@ -802,49 +768,6 @@ class ChatController extends GetxController with WidgetsBindingObserver {
     }
   }
 
-  Future<void> searchUsers(String query) async {
-    final trimmedQuery = query.trim();
-    if (trimmedQuery.isEmpty) {
-      searchResults.clear();
-      return;
-    }
-
-    try {
-      isLoading.value = true;
-      final results = await _chatService.searchUsers(
-        trimmedQuery,
-        excludeUserId: currentUserId.value,
-      );
-      searchResults.value = results;
-    } on FirebaseException catch (e) {
-      _logger.e('Firebase error searching users', error: e);
-      common.showSnackbar('Error', 'Failed to search users', Colors.red);
-      searchResults.clear();
-    } catch (e) {
-      _logger.e('Unexpected error searching users', error: e);
-      common.showSnackbar('Error', 'Unexpected error occurred', Colors.red);
-      searchResults.clear();
-    } finally {
-      isLoading.value = false;
-    }
-  }
-
-
-  // send a image to specific friend
-  Future<void> uploadSmallImage(String userId) async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile == null) return;
-
-    final file = File(pickedFile.path);
-    final bytes = await file.readAsBytes();
-    final base64Image = base64Encode(bytes);
-
-    await FirebaseFirestore.instance.collection('users').doc(userId).update({
-      'photoBase64': base64Image,
-    });
-  }
-
   Future<void> signOut() async {
     try {
       for (var sub in _subscriptions) {
@@ -920,19 +843,9 @@ class ChatController extends GetxController with WidgetsBindingObserver {
     }
   }
 
-  // Method to handle audio file path conversion for playback
-  Future<String> getAudioFilePath(MessageModel message) async {
-    if (message.type == MessageType.audio) {
-      return await _chatService.saveAudioFromBase64(
-        message.content,
-        message.id,
-      );
-    }
-    return '';
-  }
 
   Future<void> sendImageMessage(String receiverId, File imageFile) async {
-    if (receiverId.isEmpty || imageFile.path.isEmpty) {
+    if (receiverId.isEmpty || !imageFile.existsSync()) {
       common.showSnackbar('Error', 'Invalid image or receiver', Colors.red);
       return;
     }
@@ -945,11 +858,16 @@ class ChatController extends GetxController with WidgetsBindingObserver {
     try {
       isSendingMessage.value = true;
 
-      // Read image file and convert to base64 (same approach as voice messages)
+      // Read image and convert to base64
       final bytes = await imageFile.readAsBytes();
       final base64Image = base64Encode(bytes);
 
-      // Prepare message model
+      // Create data URL format
+      final String imageExtension = imageFile.path.split('.').last.toLowerCase();
+      final String mimeType = _getMimeType(imageExtension);
+      final String dataUrl = 'data:$mimeType;base64,$base64Image';
+
+      // Create message model with base64 in mediaUrl field
       final chatId = _chatService.getChatId(currentUserId.value, receiverId);
       final message = MessageModel(
         id: _chatService.generateMessageId(chatId),
@@ -957,38 +875,60 @@ class ChatController extends GetxController with WidgetsBindingObserver {
         senderId: currentUserId.value,
         receiverId: receiverId,
         type: MessageType.image,
-        content: base64Image,
+        content: "",
+        mediaUrl: dataUrl,
         timestamp: DateTime.now(),
         status: MessageStatus.sending,
         metadata: {
           'size': bytes.length,
           'encoding': 'base64',
+          'originalExtension': imageExtension,
+          'mimeType': mimeType,
         },
       );
 
-      // Send message to Firestore
+      // Send to Firestore
       await _chatService.sendMessageModel(message);
 
-      // Add locally to UI
+      // Add to local UI
       messages.add(message);
       messages.refresh();
       updateUserChats();
 
-      // Optionally, send notification
+      // Send notification
       await ChatFirebaseManager().sendChatNotification(
         receiverId: receiverId,
         chatId: chatId,
-        message: '[Image]',
+        message: '📷 Photo',
         messageType: 'image',
         senderName: currentUser.value?.name ?? 'Unknown',
         senderId: currentUserId.value,
       );
+
+      print('✅ Image message sent successfully as base64');
+
     } catch (e, st) {
-      _logger.e('Failed to send image message (base64)', error: e, stackTrace: st);
+      _logger.e('Failed to send image message', error: e, stackTrace: st);
       common.showSnackbar('Error', 'Failed to send image', Colors.red);
     } finally {
       isSendingMessage.value = false;
     }
   }
 
+// Helper method to get MIME type
+  String _getMimeType(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      default:
+        return 'image/jpeg';
+    }
+  }
 }

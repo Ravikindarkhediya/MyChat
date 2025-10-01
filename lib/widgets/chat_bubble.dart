@@ -196,61 +196,124 @@ class ChatBubble extends StatelessWidget {
     }
   }
 
-
   Widget _buildImageMessage() {
-    final isUrl = message.content.startsWith('http');
+    // ✅ mediaUrl field check करें, content नहीं
+    if (message.mediaUrl == null || message.mediaUrl!.isEmpty) {
+      return Container(
+        height: 150,
+        width: 150,
+        decoration: BoxDecoration(
+            color: Colors.grey.shade700,
+            borderRadius: BorderRadius.circular(16)
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.image_not_supported, color: Colors.white54),
+            SizedBox(height: 8),
+            Text('Image not available',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
+          ],
+        ),
+      );
+    }
+
+    final mediaUrl = message.mediaUrl!;
     final double w = 150, h = 150;
-    if (isUrl) {
+
+    // HTTP URL check
+    if (mediaUrl.startsWith('http')) {
       return GestureDetector(
-        onTap: () => Get.to(() => FullScreenImageView(imageUrl: message.content)),
+        onTap: () => Get.to(() => FullScreenImageView(imageUrl: mediaUrl)),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(16),
           child: CachedNetworkImage(
-            imageUrl: message.content,
+            imageUrl: mediaUrl,
             placeholder: (context, url) => Container(
-              width: w,
-              height: h,
-              decoration: BoxDecoration(color: Colors.grey.shade800, borderRadius: BorderRadius.circular(16)),
+              width: w, height: h,
+              decoration: BoxDecoration(
+                  color: Colors.grey.shade800,
+                  borderRadius: BorderRadius.circular(16)
+              ),
               child: const Center(child: CircularProgressIndicator()),
             ),
             errorWidget: (context, url, error) => Container(
-              width: w,
-              height: h,
-              decoration: BoxDecoration(color: Colors.grey.shade700, borderRadius: BorderRadius.circular(16)),
+              width: w, height: h,
+              decoration: BoxDecoration(
+                  color: Colors.grey.shade700,
+                  borderRadius: BorderRadius.circular(16)
+              ),
               child: const Icon(Icons.error, color: Colors.red),
             ),
-            width: w,
-            height: h,
+            width: w, height: h,
             fit: BoxFit.cover,
           ),
         ),
       );
-    } else {
-      // Assume base64
-      late final Uint8List bytes;
+    }
+    // Base64 data URL check
+    else if (mediaUrl.startsWith('data:image')) {
       try {
-        bytes = base64Decode(message.content);
-      } catch (_) {
-        bytes = Uint8List(0);
-      }
-      return GestureDetector(
-        onTap: () => Get.to(() => FullScreenImage(base64Data: message.content)),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: bytes.isNotEmpty
-              ? Image.memory(bytes, width: w, height: h, fit: BoxFit.cover)
-              : Container(
-                  width: w,
-                  height: h,
-                  decoration: BoxDecoration(color: Colors.grey.shade700, borderRadius: BorderRadius.circular(16)),
+        final base64Data = mediaUrl.split(',').last;
+        final bytes = base64Decode(base64Data);
+
+        return GestureDetector(
+          onTap: () => Get.to(() => FullScreenImage(base64Data: base64Data)),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Image.memory(
+              bytes,
+              width: w,
+              height: h,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                print('❌ Error displaying base64 image: $error');
+                return Container(
+                  width: w, height: h,
+                  decoration: BoxDecoration(
+                      color: Colors.grey.shade700,
+                      borderRadius: BorderRadius.circular(16)
+                  ),
                   child: const Icon(Icons.error, color: Colors.red),
-                ),
+                );
+              },
+            ),
+          ),
+        );
+      } catch (e) {
+        print('❌ Error decoding base64: $e');
+        return Container(
+          width: w, height: h,
+          decoration: BoxDecoration(
+              color: Colors.grey.shade700,
+              borderRadius: BorderRadius.circular(16)
+          ),
+          child: const Icon(Icons.broken_image, color: Colors.red),
+        );
+      }
+    }
+    // Fallback
+    else {
+      return Container(
+        width: w, height: h,
+        decoration: BoxDecoration(
+            color: Colors.grey.shade700,
+            borderRadius: BorderRadius.circular(16)
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.image_not_supported, color: Colors.white54),
+            SizedBox(height: 8),
+            Text('Unsupported format',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
+          ],
         ),
       );
     }
   }
 
-  Widget _buildLocationMessage() => Container(); // implement location widget
+  Widget _buildLocationMessage() => Container();
 
   Widget _buildTimeStamp() {
     final formatter = DateFormat('h:mm a');

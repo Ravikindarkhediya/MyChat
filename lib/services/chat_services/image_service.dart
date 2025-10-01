@@ -4,10 +4,10 @@ import 'package:get/get.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-class ImagePickerService {
-  static final ImagePickerService _instance = ImagePickerService._internal();
-  factory ImagePickerService() => _instance;
-  ImagePickerService._internal();
+class ImageService {
+  static final ImageService _instance = ImageService._internal();
+  factory ImageService() => _instance;
+  ImageService._internal();
 
   final ImagePicker _picker = ImagePicker();
 
@@ -134,4 +134,6 @@ class ImagePickerService {
     }
     return null;
   }
+
+
 }
