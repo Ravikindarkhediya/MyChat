@@ -233,7 +233,7 @@ class HomePage extends StatelessWidget {
                     Expanded(
                       child: GestureDetector(
                         onTap: () {
-                          chatController.rejectFriendRequest(request.id);
+                          chatController.rejectFriendRequest(request.id, request.senderId);
                           Get.back();
                           Get.snackbar(
                             'Rejected',

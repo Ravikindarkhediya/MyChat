@@ -99,6 +99,7 @@ class ApiNotificationService {
     required String senderId,
     required String senderName,
     required String senderEmail,
+    String chatId = '', // Use friend request ID if available
   }) async {
     try {
       final response = await http.post(
@@ -109,7 +110,7 @@ class ApiNotificationService {
           'senderId': senderId,
           'senderName': senderName,
           'message': '$senderName sent you a friend request',
-          'chatId': '', // Empty for friend requests
+          'chatId': chatId,
           'messageType': 'friend_request',
         }),
       ).timeout(const Duration(seconds: 15));
@@ -121,6 +122,42 @@ class ApiNotificationService {
       return false;
     } catch (e) {
       print('❌ Error sending friend request notification: $e');
+      return false;
+    }
+  }
+  static Future<bool> sendFriendRequestStatusNotification({
+    required String receiverId,
+    required String senderId,
+    required String senderName,
+    required String status, // 'accepted' or 'rejected'
+  }) async {
+    try {
+      final message = status == 'accepted'
+          ? '$senderName accepted your friend request'
+          : '$senderName declined your friend request';
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/send-notification'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'receiverId': receiverId,
+          'senderId': senderId,
+          'senderName': senderName,
+          'message': message,
+          'chatId': '',
+          // Use a generic type supported by backend and include status separately
+          'messageType': 'friend_request',
+          'status': status,
+        }),
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['success'] ?? false;
+      }
+      return false;
+    } catch (e) {
+      print('❌ Error sending friend request status notification: $e');
       return false;
     }
   }

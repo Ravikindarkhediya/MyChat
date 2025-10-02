@@ -39,7 +39,6 @@ class ChatController extends GetxController with WidgetsBindingObserver {
   // Disposers
   final List<StreamSubscription> _subscriptions = [];
   StreamSubscription? _userChatsSubscription;
-  final VoiceRecordingService _voiceService = VoiceRecordingService();
 
   // Observables
   final RxList<MessageModel> messages = <MessageModel>[].obs;
@@ -472,6 +471,7 @@ class ChatController extends GetxController with WidgetsBindingObserver {
 
       await batch.commit();
 
+
       // Get the sender's user data
       final senderDoc = await _firestore
           .collection('users')
@@ -491,7 +491,7 @@ class ChatController extends GetxController with WidgetsBindingObserver {
       // Refresh data from server
       await Future.wait([loadFriends(), fetchFriendRequests()]);
 
-      common.showSnackbar('Success', 'Friend request accepted', Colors.green);
+
     } on FirebaseException catch (e) {
       _logger.e('Firebase error accepting friend request', error: e);
       common.showSnackbar(
@@ -508,7 +508,7 @@ class ChatController extends GetxController with WidgetsBindingObserver {
   }
 
   // Reject friend request
-  Future<void> rejectFriendRequest(String requestId) async {
+  Future<void> rejectFriendRequest(String requestId, String receiverId) async {
     try {
       isLoading.value = true;
       final batch = _firestore.batch();
@@ -532,10 +532,21 @@ class ChatController extends GetxController with WidgetsBindingObserver {
 
       await batch.commit();
 
+      // Notify the original sender that their request was rejected
+      try {
+        await ApiNotificationService.sendFriendRequestStatusNotification(
+          receiverId: receiverId,
+          senderId: currentUserId.value,
+          senderName: currentUser.value?.name ?? 'Unknown',
+          status: 'rejected',
+        );
+      } catch (e) {
+        _logger.w('⚠️ Failed to send reject notification: $e');
+      }
+
       // Reload friend requests
       await fetchFriendRequests();
 
-      common.showSnackbar('Info', 'Friend request rejected', Colors.blue);
     } on FirebaseException catch (e) {
       _logger.e('Firebase error rejecting friend request', error: e);
       common.showSnackbar(
@@ -616,7 +627,6 @@ class ChatController extends GetxController with WidgetsBindingObserver {
         return;
       }
 
-      // STEP 5: Create friend request (SIRF EK BAAR)
       final requestRef = await _firestore.collection('friend_requests').add({
         'senderId': currentUserId.value,
         'receiverId': receiverId,
@@ -639,6 +649,7 @@ class ChatController extends GetxController with WidgetsBindingObserver {
           senderId: currentUserId.value,
           senderName: currentUser.value?.name ?? 'Unknown User',
           senderEmail: currentUser.value?.email ?? '',
+          chatId: requestRef.id,
         );
         _logger.i('✅ Friend request notification sent successfully');
       } catch (notificationError) {
@@ -688,33 +699,11 @@ class ChatController extends GetxController with WidgetsBindingObserver {
     try {
       isSendingMessage.value = true;
 
-      // Pre-flight logging for debugging notification pipeline
-      _logger.i('🧭 Preparing to send message');
-      _logger.i('   • senderId: $senderId');
-      _logger.i('   • senderName: $senderName');
-      _logger.i('   • receiverId: $receiverId');
-      _logger.i('   • chatId: $chatId');
-      _logger.i('   • message(len=${trimmed.length}): "$trimmed"');
-
-      // Fetch and log receiver FCM-related info before sending notification
       try {
         final receiverDoc = await _firestore
             .collection('users')
             .doc(receiverId)
             .get();
-        if (!receiverDoc.exists) {
-          _logger.w('⚠️ Receiver user not found in Firestore: $receiverId');
-        } else {
-          final data = receiverDoc.data() ?? {};
-          final rawToken = (data['fcmToken']?.toString() ?? '');
-          final tokenPreview = rawToken.isEmpty
-              ? 'null'
-              : '${rawToken.substring(0, rawToken.length.clamp(0, 12))}...';
-          _logger.i('👤 Receiver profile snapshot:');
-          _logger.i('   • fcmToken: $tokenPreview');
-          _logger.i('   • isOnline: ${data['isOnline'] ?? false}');
-          _logger.i('   • activeChatId: ${data['activeChatId'] ?? '(none)'}');
-        }
       } catch (e) {
         _logger.w('⚠️ Failed to read receiver FCM info: $e');
       }

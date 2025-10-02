@@ -1,7 +1,7 @@
 import 'package:ads_demo/models/user_model.dart';
 
 class FriendRequest {
-  final String id;        // Firestore request ID
+  final String id;
   final String senderId;
   final UserModel sender;
   final String status;

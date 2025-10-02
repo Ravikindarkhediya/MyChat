@@ -1,5 +1,7 @@
 // lib/services/firebase_notification_service.dart (FIXED)
 import 'dart:convert';
+import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -7,6 +9,7 @@ import 'package:flutter/material.dart'; // ✅ ADD THIS FOR AlertDialog
 import 'package:get/get.dart';
 import '../../firebase_options.dart';
 import '../calling_service.dart';
+import 'api_notification_service.dart';
 
 class FirebaseNotificationService {
   static final FirebaseNotificationService _instance = FirebaseNotificationService._internal();
@@ -42,8 +45,9 @@ class FirebaseNotificationService {
 
     if (messageType == 'video_call' || messageType == 'voice_call') {
       await _showIncomingCallNotification(message);
-    } else if (messageType == 'friend_request') {
-      // ✅ YE CASE ADD KARO
+    } else if (messageType == 'friend_request' ||
+        messageType == 'friend_request_accepted' ||
+        messageType == 'friend_request_rejected') {
       await _showFriendRequestBackgroundNotification(message);
     }
   }
@@ -64,11 +68,23 @@ class FirebaseNotificationService {
     );
 
     final senderName = message.data['senderName'] ?? 'Someone';
+    final messageType = message.data['messageType'] ?? 'friend_request';
+    final status = (message.data['status'] ?? '').toString();
+
+    final bool accepted = messageType == 'friend_request_accepted' || status == 'accepted';
+    final bool rejected = messageType == 'friend_request_rejected' || status == 'rejected';
+
+    final String title = (accepted || rejected) ? 'Friend Request Update' : 'Friend Request';
+    final String body = accepted
+        ? '$senderName accepted your friend request'
+        : rejected
+            ? '$senderName declined your friend request'
+            : '$senderName sent you a friend request';
 
     await localNotifications.show(
       message.hashCode,
-      'Friend Request',
-      '$senderName sent you a friend request',
+      title,
+      body,
       notificationDetails,
       payload: jsonEncode(message.data),
     );
@@ -230,20 +246,32 @@ class FirebaseNotificationService {
     final messageType = message.data['messageType'];
     if (messageType == 'video_call' || messageType == 'voice_call') {
       await _showIncomingCallDialog(message);
-    } else if (messageType == 'friend_request') {
-      // ✅ YE NAYA CODE ADD KARO
-      await _showFriendRequestNotification(message);
+    } else if (messageType == 'friend_request' ||
+        messageType == 'friend_request_accepted' ||
+        messageType == 'friend_request_rejected') {
+      await showFriendRequestNotification(message);
     } else {
       await _showLocalNotification(message);
     }
   }
-  Future<void> _showFriendRequestNotification(RemoteMessage message) async {
+  Future<void> showFriendRequestNotification(RemoteMessage message) async {
     final senderName = message.data['senderName'] ?? 'Someone';
-    final senderId = message.data['senderId'];
+    final messageType = message.data['messageType'] ?? 'friend_request';
+    final status = (message.data['status'] ?? '').toString();
+
+    final bool accepted = messageType == 'friend_request_accepted' || status == 'accepted';
+    final bool rejected = messageType == 'friend_request_rejected' || status == 'rejected';
+
+    final String title = (accepted || rejected) ? 'Friend Request Update' : 'Friend Request';
+    final String body = accepted
+        ? '$senderName accepted your friend request'
+        : rejected
+            ? '$senderName declined your friend request'
+            : '$senderName sent you a friend request';
 
     Get.defaultDialog(
-      title: 'Friend Request',
-      middleText: '$senderName sent you a friend request',
+      title: title,
+      middleText: body,
       backgroundColor: Colors.white,
       titleStyle: const TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.bold),
       middleTextStyle: const TextStyle(color: Colors.black54, fontSize: 14),
@@ -260,7 +288,7 @@ class FirebaseNotificationService {
         ElevatedButton(
           onPressed: () {
             Get.back();
-            Get.snackbar('Info', 'Check your friend requests to accept or decline');
+            Get.snackbar('Info', 'Check your friend requests to proceed');
           },
           style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
           child: const Text('OK', style: TextStyle(color: Colors.white)),
@@ -383,17 +411,117 @@ class FirebaseNotificationService {
 
   Future<void> _saveFCMToken(String userId) async {
     try {
+      print('🔄 Starting FCM token retrieval for user: $userId');
+
+      // Get fresh token
       final token = await _firebaseMessaging.getToken();
-      if (token != null) {
-        // Save to your backend or Firestore
-        print('💾 FCM Token saved for user $userId: $token');
-        // TODO: Implement API call to save token
+
+      if (token == null) {
+        print('❌ FCM Token is null - requesting permissions first');
+        await _requestNotificationPermissions();
+
+        // Try again after permissions
+        await Future.delayed(Duration(seconds: 2));
+        final retryToken = await _firebaseMessaging.getToken();
+
+        if (retryToken == null) {
+          print('❌ FCM Token still null after permission request');
+          return;
+        }
+
+        print('✅ FCM Token retrieved after permission: ${retryToken.substring(0, 20)}...');
+      } else {
+        print('✅ FCM Token retrieved: ${token.substring(0, 20)}...');
+      }
+
+      final finalToken = token ?? await _firebaseMessaging.getToken();
+
+      if (finalToken != null) {
+        // ✅ STEP 1: Save to Firestore
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userId)
+            .update({
+          'fcmToken': finalToken,
+          'tokenTimestamp': FieldValue.serverTimestamp(),
+          'deviceInfo': {
+            'platform': Platform.isAndroid ? 'android' : 'ios',
+            'appVersion': '1.0.0',
+          }
+        });
+        print('💾 FCM Token saved to Firestore: ✅');
+
+        // ✅ STEP 2: Save to Backend API
+        final apiSuccess = await ApiNotificationService.updateFCMToken(
+          userId: userId,
+          fcmToken: finalToken,
+          deviceType: Platform.isAndroid ? 'android' : 'ios',
+        );
+        print('💾 FCM Token saved to Backend: ${apiSuccess ? '✅' : '❌'}');
+
+        // ✅ STEP 3: Test token by sending test notification
+        await _validateTokenWithTestNotification(userId, finalToken);
+
+      } else {
+        print('❌ Unable to get FCM token');
       }
     } catch (e) {
-      print('❌ Error saving FCM token: $e');
+      print('❌ Error in FCM token management: $e');
+    }
+  }
+  Future<void> _validateTokenWithTestNotification(String userId, String token) async {
+    try {
+      print('🧪 Testing FCM token with test notification...');
+
+      // Send test notification via API
+      final testResult = await ApiNotificationService.sendNotification(
+        receiverId: userId,
+        senderId: userId,
+        senderName: 'System Test',
+        message: 'FCM Token is working! 🎉',
+        chatId: 'test_notification',
+        messageType: 'test',
+      );
+
+      print('🧪 Test notification result: ${testResult ? '✅ SUCCESS' : '❌ FAILED'}');
+
+      if (!testResult) {
+        print('⚠️ Token validation failed - may need to refresh token');
+      }
+
+    } catch (e) {
+      print('❌ Token validation error: $e');
     }
   }
 
+  // ✅ ADD: Request permissions properly
+  Future<void> _requestNotificationPermissions() async {
+    try {
+      final settings = await _firebaseMessaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        announcement: false,
+        criticalAlert: false,
+        carPlay: false,
+        provisional: false,
+      );
+
+      print('🔔 Permission status: ${settings.authorizationStatus}');
+
+      if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        print('❌ Notification permissions denied');
+        Get.snackbar(
+          'Permissions Required',
+          'Please enable notifications to receive friend requests',
+          backgroundColor: Colors.orange,
+          colorText: Colors.white,
+        );
+      }
+    } catch (e) {
+      print('❌ Permission request error: $e');
+    }
+  }
   // Cleanup
   Future<void> cleanup() async {
     _callingService.dispose();

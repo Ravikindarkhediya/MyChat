@@ -638,12 +638,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                       'Mute Notifications',
                     ),
                     buildPopupMenuItem(
-                      'clear_for_me',
-                      Icons.notifications_off_rounded,
+                      'clear_chat',
+                      Icons.delete_sweep_rounded,
                       'Clear Chat',
                     ),
                     buildPopupMenuItem(
-                      'block',
+                      'delete',
                       Icons.block_rounded,
                       'Delete User',
                     ),

@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../controller/auth_controller.dart';
 import '../notification_service/api_notification_service.dart';
+import '../notification_service/notification_service.dart';
 
 class ChatFirebaseManager {
   static final ChatFirebaseManager _instance = ChatFirebaseManager._internal();
@@ -187,11 +188,19 @@ class ChatFirebaseManager {
     // ✅ Foreground message handler for chat
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
       print('📥 Foreground chat message: ${message.notification?.title}');
+      final String? messageType = message.data['messageType'];
 
-      // ✅ Check if user is in the same chat
+      // ✅ Friend request notifications (send/accept/reject)
+      if (messageType == 'friend_request' ||
+          messageType == 'friend_request_accepted' ||
+          messageType == 'friend_request_rejected') {
+        await FirebaseNotificationService().showFriendRequestNotification(message);
+        return;
+      }
+
+      // ✅ Chat message notifications
       final String? chatId = message.data['chatId'];
       final String? activeChatId = await _getActiveChatId();
-
       if (chatId != null && chatId != activeChatId) {
         await _showChatNotification(message);
       } else {
@@ -335,7 +344,7 @@ class ChatFirebaseManager {
     required String receiverId,
     required String chatId,
     required String message,
-    required String senderId, // ✅ Make it required parameter
+    required String senderId,
     String? messageType,
     String? senderName,
   }) async {

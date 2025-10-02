@@ -121,33 +121,6 @@ class UserService {
     }
   }
 
-  /// ------------------------------
-  /// FRIEND REQUESTS
-  /// ------------------------------
-
-  Future<void> acceptFriendRequest(String requestId) async {
-    final requestDoc = await _requestsRef.doc(requestId).get();
-    if (!requestDoc.exists) return;
-
-    final data = requestDoc.data()!;
-    final senderId = data['senderId'];
-    final receiverId = data['receiverId'];
-
-    // Save friendship
-    final friendship = _friendsRef.doc();
-    await friendship.set({
-      'id': friendship.id,
-      'users': [senderId, receiverId],
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    await _requestsRef.doc(requestId).update({'status': 'accepted'});
-  }
-
-  Future<void> rejectFriendRequest(String requestId) async {
-    await _requestsRef.doc(requestId).update({'status': 'rejected'});
-  }
-
   Future<bool> areFriends(String user1, String user2) async {
     final query = await _friendsRef.where('users', arrayContains: user1).get();
     for (var doc in query.docs) {
