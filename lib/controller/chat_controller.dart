@@ -154,7 +154,6 @@ class ChatController extends GetxController with WidgetsBindingObserver {
     try {
       if (currentUserId.value.isEmpty) return;
 
-      // चैट सर्विस से नवीनतम चैट्स प्राप्त करें
       final chats = await _chatService.fetchUserChats(currentUserId.value);
       if (chats != null) {
         userChats.value = chats;

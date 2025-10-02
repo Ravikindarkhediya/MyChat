@@ -299,8 +299,6 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
       for (String chatId in chatIds) {
         print('🔍 Trying chat ID: $chatId');
 
-        await userService.debugChatMessages(chatId);
-
         final chatDoc = await FirebaseFirestore.instance
             .collection('chats')
             .doc(chatId)
@@ -620,7 +618,7 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Color(0xFF1e3c72), Color(0xFF2a5298), Colors.black],
+            colors: [Color(0xFF1180FF), Color(0xFF112D5A)],
           ),
         ),
         child: peerUser == null

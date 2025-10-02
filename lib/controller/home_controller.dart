@@ -52,7 +52,6 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
         }
       }, onError: (err) {
         isLoading.value = false;
-        print("Error loading current user: $err");
       }),
     );
   }

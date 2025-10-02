@@ -68,7 +68,6 @@ dependencies:
 
 
   # Utils
-  animated_background:
   uuid: ^4.2.2
   equatable: ^2.0.5
   logger: ^2.0.2

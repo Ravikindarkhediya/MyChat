@@ -35,7 +35,7 @@ class ChatFirebaseManager {
     _currentUserId = userId;
     _currentUserName = userName;
 
-    NotificationSettings notificationSettings =
+    final NotificationSettings notificationSettings =
     await FirebaseMessaging.instance.requestPermission(
       alert: true,
       badge: true,
@@ -424,9 +424,7 @@ class ChatFirebaseManager {
       }
       await batch.commit();
 
-      print('✅ Messages marked as read in chat: $chatId');
     } catch (e) {
-      print('❌ Error marking messages as read: $e');
     }
   }
 
@@ -439,7 +437,6 @@ class ChatFirebaseManager {
         'lastSeen': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print('❌ Error updating online status: $e');
     }
   }
 
@@ -451,10 +448,8 @@ class ChatFirebaseManager {
 
 @pragma('vm:entry-point')
 Future<void> _chatBackgroundMessageHandler(RemoteMessage message) async {
-  print('📩 Background chat message: ${message.notification?.title}');
 
   await Firebase.initializeApp();
 
   // ✅ Handle background notification logic here
-  print('Background message data: ${message.data}');
 }

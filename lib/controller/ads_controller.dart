@@ -1,69 +1,49 @@
 import 'package:get/get.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
-import '../helper/ad_helper.dart';
 
 class AdsController extends GetxController {
-  RxInt counter = 0.obs;
-
   BannerAd? bannerAd;
-  InterstitialAd? interstitialAd;
+  bool isBannerLoaded = false;
+  int _retryCount = 0;
+  static const int _maxRetry = 5;
 
   @override
   void onInit() {
     super.onInit();
-    _loadBannerAd();
-    _loadInterstitialAd();
+    loadBanner();
   }
 
-  void _loadBannerAd() {
-    BannerAd(
+  void loadBanner() {
+    bannerAd = BannerAd(
+      adUnitId: 'ca-app-pub-3342282178653412/8107973460', // Updated
       size: AdSize.banner,
-      adUnitId: AdHelper.bannerAdUnitId,
+      request: const AdRequest(nonPersonalizedAds: true),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
-          bannerAd = ad as BannerAd;
-          update(); // Notify UI
+          print('✅ Banner Loaded');
+          isBannerLoaded = true;
+          update();
+          _retryCount = 0;
         },
-        onAdFailedToLoad: (ad, err) {
-          print('Failed to load banner Ad: ${err.message}');
+        onAdFailedToLoad: (ad, error) {
+          print('❌ Banner failed: ${error.code} - ${error.message}');
           ad.dispose();
+          isBannerLoaded = false;
+          update();
+
+          if (_retryCount < _maxRetry) {
+            _retryCount++;
+            print('Retrying to load banner ($_retryCount)');
+            loadBanner();
+          }
         },
       ),
-      request: const AdRequest(),
-    ).load();
-  }
-
-  void _loadInterstitialAd() {
-    InterstitialAd.load(
-      adUnitId: AdHelper.getInterstitialAdUnitId,
-      request: const AdRequest(),
-      adLoadCallback: InterstitialAdLoadCallback(
-        onAdLoaded: (ad) {
-          ad.fullScreenContentCallback = FullScreenContentCallback(
-            onAdDismissedFullScreenContent: (ad) {},
-          );
-          interstitialAd = ad;
-          update(); // Notify UI
-        },
-        onAdFailedToLoad: (err) {
-          print('Failed to load interstitial Ad: ${err.message}');
-        },
-      ),
-    );
-  }
-
-  void showInterstitial() {
-    interstitialAd?.show();
-  }
-
-  void incrementCounter() {
-    counter.value++;
+    )..load();
   }
 
   @override
   void onClose() {
     bannerAd?.dispose();
-    interstitialAd?.dispose();
     super.onClose();
   }
 }

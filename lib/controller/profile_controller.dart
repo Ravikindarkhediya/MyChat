@@ -171,34 +171,4 @@ class ProfileController extends GetxController {
     markChanged();
   }
 
-  // Update friends count (reactive)
-  void setFriendsCount(int count) => friendsCount.value = count;
-
-  // Check if user has unsaved changes
-  bool get hasUnsavedChanges => isChanged.value;
-
-  // Validation methods
-  String? validateName(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Name is required';
-    }
-    if (value.trim().length < 2) {
-      return 'Name must be at least 2 characters';
-    }
-    return null;
-  }
-
-  String? validateBio(String? value) {
-    if (value != null && value.length > 150) {
-      return 'Bio must be less than 150 characters';
-    }
-    return null;
-  }
-
-  String? validateStatus(String? value) {
-    if (value != null && value.length > 50) {
-      return 'Status must be less than 50 characters';
-    }
-    return null;
-  }
 }

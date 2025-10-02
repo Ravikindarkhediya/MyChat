@@ -1,11 +1,8 @@
 import 'dart:ui';
-
-import 'package:ads_demo/constant/common.dart';
 import 'package:ads_demo/controller/home_controller.dart';
 import 'package:ads_demo/controller/profile_controller.dart';
 import 'package:ads_demo/services/chat_services/chat_services.dart';
 import 'package:ads_demo/widgets/glass.dart';
-import 'package:animated_background/animated_background.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -262,9 +259,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           decoration: const BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                Color(0xFF1e3c72),
-                Color(0xFF2a5298),
-                Colors.black,
+                Color(0xFF1180FF), Color(0xFF112D5A)
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -295,101 +290,95 @@ class _ProfileScreenState extends State<ProfileScreen>
         child: SingleChildScrollView(
           child: Container(
             height: MediaQuery.of(context).size.height,
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  const Color(0xFF1e3c72),
-                  const Color(0xFF2a5298),
-                  Colors.black12.withOpacity(0.9),
+                  Color(0xFF1180FF), Color(0xFF112D5A)
                 ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
             ),
-            child: AnimatedBackground(
-              vsync: this,
-              behaviour: Common().buildBehaviour(),
-              child: Stack(
-                children: [
-                  Column(
-                    children: [
-                      const SizedBox(height: 80),
-                      _buildProfileHeader(),
-                      _buildProfileInfo(),
-                      _buildSignOutButton(
-                        onPressed: () {
-                          _chatController.signOut();
-                        },
-                      ),
-                    ],
+            child: Stack(
+              children: [
+                Column(
+                  children: [
+                    const SizedBox(height: 80),
+                    _buildProfileHeader(),
+                    _buildProfileInfo(),
+                    _buildSignOutButton(
+                      onPressed: () {
+                        _chatController.signOut();
+                      },
+                    ),
+                  ],
+                ),
+                // Back button
+                Positioned(
+                  top: MediaQuery.of(context).padding.top + 8,
+                  left: 8,
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      color: Colors.black26,
+                      shape: BoxShape.circle,
+                    ),
+                    child: IconButton(
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      onPressed: () => Get.back(),
+                    ),
                   ),
-                  // Back button
+                ),
+                // Edit profile button (for current user)
+                if (widget.isCurrentUser ||
+                    _user?.uid == _chatController.currentUserId.value)
                   Positioned(
                     top: MediaQuery.of(context).padding.top + 8,
-                    left: 8,
+                    right: 8,
                     child: Container(
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                         color: Colors.black26,
-                        shape: BoxShape.circle,
+                        borderRadius: BorderRadius.circular(20),
                       ),
-                      child: IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Get.back(),
-                      ),
+                      child: Obx(() => profileController.isEditing.value
+                          ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(
+                              Icons.close,
+                              color: Colors.white,
+                            ),
+                            onPressed: () {
+                              profileController.cancelEditing();
+                              setState(() {
+                                _pickedImage = null;
+                                _nameController.text = _user?.name ?? '';
+                                _bioController.text = _user?.bio ?? '';
+                                _statusController.text = _user?.status ?? '';
+                              });
+                            },
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.check,
+                              color: Colors.white,
+                            ),
+                            onPressed: _saveProfile,
+                          ),
+                        ],
+                      )
+                          : IconButton(
+                        icon: const Icon(
+                          Icons.edit,
+                          color: Colors.white,
+                        ),
+                        onPressed: () {
+                          profileController.enableEditing();
+                        },
+                      )),
                     ),
                   ),
-                  // Edit profile button (for current user)
-                  if (widget.isCurrentUser ||
-                      _user?.uid == _chatController.currentUserId.value)
-                    Positioned(
-                      top: MediaQuery.of(context).padding.top + 8,
-                      right: 8,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.black26,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Obx(() => profileController.isEditing.value
-                            ? Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(
-                                Icons.close,
-                                color: Colors.white,
-                              ),
-                              onPressed: () {
-                                profileController.cancelEditing();
-                                setState(() {
-                                  _pickedImage = null;
-                                  _nameController.text = _user?.name ?? '';
-                                  _bioController.text = _user?.bio ?? '';
-                                  _statusController.text = _user?.status ?? '';
-                                });
-                              },
-                            ),
-                            IconButton(
-                              icon: const Icon(
-                                Icons.check,
-                                color: Colors.white,
-                              ),
-                              onPressed: _saveProfile,
-                            ),
-                          ],
-                        )
-                            : IconButton(
-                          icon: const Icon(
-                            Icons.edit,
-                            color: Colors.white,
-                          ),
-                          onPressed: () {
-                            profileController.enableEditing();
-                          },
-                        )),
-                      ),
-                    ),
-                ],
-              ),
+              ],
             ),
           ),
         ),

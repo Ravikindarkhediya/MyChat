@@ -6,31 +6,29 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'controller/ads_controller.dart';
 import 'firebase_options.dart';
 
-// ✅ Updated main.dart
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-
-  // ✅ Add ChatFirebaseManager background handler
   FirebaseMessaging.onBackgroundMessage(_chatBackgroundMessageHandler);
 
-  MobileAds.instance.initialize();
+  // Initialize Google Mobile Ads before creating AdsController to ensure ads can load
+  await MobileAds.instance.initialize();
+
+  Get.put(AdsController());
   runApp(const MyApp());
 }
 
-// ✅ Add this background handler
 @pragma('vm:entry-point')
 Future<void> _chatBackgroundMessageHandler(RemoteMessage message) async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-
   print('📩 Background chat message: ${message.notification?.title}');
   print('📱 Message data: ${message.data}');
 }
@@ -50,7 +48,5 @@ class MyApp extends StatelessWidget {
       ),
     );
   }
-
-
 }
 

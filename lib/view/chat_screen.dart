@@ -3,7 +3,6 @@ import 'package:ads_demo/constant/common.dart';
 import 'package:ads_demo/services/calling_service.dart';
 import 'package:ads_demo/services/chat_services/chat_services.dart';
 import 'package:ads_demo/services/user_service.dart';
-import 'package:animated_background/animated_background.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -54,7 +53,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   // General Variables
   int _behaviourIndex = 0;
-  Behaviour? _behaviour;
 
   String _formatLastSeen(DateTime lastSeen) {
     final now = DateTime.now();
@@ -160,7 +158,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         if (snapshot.hasError) {
           return Center(
             child: GlassContainer(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(10),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -195,7 +193,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(
             child: GlassContainer(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(10),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -227,8 +225,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               child: SlideTransition(
                 position: _slideAnimation,
                 child: GlassContainer(
-                  margin: const EdgeInsets.all(24),
-                  padding: const EdgeInsets.all(24),
+                  margin: const EdgeInsets.all(10),
+                  padding: const EdgeInsets.all(10),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -353,15 +351,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                const Color(0xFF1e3c72),
-                const Color(0xFF2a5298),
-                Colors.black,
+                Color(0xFF1180FF), Color(0xFF112D5A)
               ],
             ),
           ),
           child: Center(
             child: GlassContainer(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(10),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -659,76 +655,72 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Color(0xFF1e3c72), Color(0xFF2a5298), Colors.black],
+            colors: [Color(0xFF1180FF), Color(0xFF112D5A)],
           ),
         ),
-        child: AnimatedBackground(
-          vsync: this,
-          behaviour: _behaviour = Common().buildBehaviour(),
-          child: Column(
-            children: [
-              // Messages list
-              Expanded(
-                child: Stack(
-                  children: [
-                    // Messages
-                    _buildMessageList(),
-                  ],
-                ),
+        child: Column(
+          children: [
+            // Messages list
+            Expanded(
+              child: Stack(
+                children: [
+                  // Messages
+                  _buildMessageList(),
+                ],
               ),
+            ),
 
-              // Emoji picker
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                height: _isEmojiVisible ? 280 : 0,
-                child: _isEmojiVisible
-                    ? GlassContainer(
-                        margin: const EdgeInsets.symmetric(horizontal: 12),
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  'Emojis',
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.white.withOpacity(0.8),
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+            // Emoji picker
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              height: _isEmojiVisible ? 280 : 0,
+              child: _isEmojiVisible
+                  ? GlassContainer(
+                      margin: const EdgeInsets.symmetric(horizontal: 0),
+                      padding: const EdgeInsets.all(10),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Emojis',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white.withOpacity(0.8),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
                                 ),
-                                IconButton(
-                                  onPressed: () =>
-                                      setState(() => _isEmojiVisible = false),
-                                  icon: Icon(
-                                    Icons.keyboard_arrow_down_rounded,
-                                    color: Colors.white.withOpacity(0.6),
-                                  ),
+                              ),
+                              IconButton(
+                                onPressed: () =>
+                                    setState(() => _isEmojiVisible = false),
+                                icon: Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  color: Colors.white.withOpacity(0.6),
                                 ),
-                              ],
-                            ),
-                            Expanded(
-                              child: Center(
-                                child: Text(
-                                  'Emoji picker coming soon!',
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.white.withOpacity(0.6),
-                                    fontSize: 14,
-                                  ),
+                              ),
+                            ],
+                          ),
+                          Expanded(
+                            child: Center(
+                              child: Text(
+                                'Emoji picker coming soon!',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white.withOpacity(0.6),
+                                  fontSize: 14,
                                 ),
                               ),
                             ),
-                          ],
-                        ),
-                      )
-                    : const SizedBox.shrink(),
-              ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
 
-              // Message input
-              _buildMessageInput(),
-            ],
-          ),
+            // Message input
+            _buildMessageInput(),
+          ],
         ),
       ),
     );

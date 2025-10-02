@@ -21,9 +21,6 @@ class ChatService {
   String? get _currentUserId => _auth.currentUser?.uid;
 
 
-  void setRecentlyReadChat(String chatId) {
-    _recentlyReadChatId = chatId;
-  }
 
   String getChatId(String user1, String user2) {
     if (user1.isEmpty || user2.isEmpty) {
@@ -120,24 +117,6 @@ class ChatService {
       rethrow;
     } catch (e) {
       _logger.e('Unexpected error sending voice message', error: e, stackTrace: StackTrace.current);
-      rethrow;
-    }
-  }
-
-  // Convert base64 audio to file for playback
-  Future<String> saveAudioFromBase64(String base64Audio, String messageId) async {
-    try {
-      final directory = await getTemporaryDirectory();
-      final audioFile = File('${directory.path}/audio_$messageId.aac');
-
-      if (!audioFile.existsSync()) {
-        final audioBytes = base64Decode(base64Audio);
-        await audioFile.writeAsBytes(audioBytes);
-      }
-
-      return audioFile.path;
-    } catch (e) {
-      _logger.e('Error saving audio from base64', error: e);
       rethrow;
     }
   }
@@ -354,10 +333,8 @@ class ChatService {
       final chatRef = _db.collection('chats').doc(chatId);
       final messagesRef = chatRef.collection('messages');
 
-      // Batch operation start करें
       final batch = _db.batch();
 
-      // सभी messages को soft delete करें
       final messagesSnapshot = await messagesRef.get();
       for (var doc in messagesSnapshot.docs) {
         batch.update(doc.reference, {
@@ -365,7 +342,6 @@ class ChatService {
         });
       }
 
-      // Chat document को भी soft delete करें
       batch.update(chatRef, {
         'deletedFor': FieldValue.arrayUnion([currentUserId]),
         'lastMessageDeletedFor': FieldValue.arrayUnion([currentUserId]),
@@ -477,25 +453,7 @@ class ChatService {
   }
 
 
-  Future<void> markChatAsRead(String chatId, String userId) async {
-    final chatDoc = FirebaseFirestore.instance.collection('chats').doc(chatId);
 
-    await chatDoc.update({
-      'unreadCount_$userId': 0,
-    });
-
-    // Optionally, update `readBy` for lastMessage too
-    await chatDoc.collection('messages')
-        .where('readBy', arrayContains: userId)
-        .get()
-        .then((snap) {
-      for (var doc in snap.docs) {
-        doc.reference.update({
-          'readBy': FieldValue.arrayUnion([userId]),
-        });
-      }
-    });
-  }
 // Generate unique message ID
   String generateMessageId(String chatId) {
     final docRef = _db.collection('chats').doc(chatId).collection('messages').doc();
